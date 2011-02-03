@@ -470,9 +470,9 @@ void TMS320C64XAsmPrinter::printMemOperand(const MachineInstr *MI,
     }
   }
   else {
-    OS << "(";
+    OS << "[";
     printOperand(MI, op_num+1, OS);
-    OS << ")";
+    OS << "]";
   }
 
   return;
