@@ -26,6 +26,7 @@
 
 #include "TMS320C64XLowering.h"
 #include "TMS320C64XTargetMachine.h"
+#include "TMS320C64XTargetObjectFile.h"
 
 #include "llvm/DerivedTypes.h"
 #include "llvm/Function.h"
@@ -45,8 +46,6 @@
 #include "llvm/CallingConv.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/ADT/VectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -125,8 +124,7 @@ static bool CC_TMS320C64X_Custom(unsigned &ValNo,
 //-----------------------------------------------------------------------------
 
 TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
-//: TargetLowering(tm, new TargetLoweringObjectFileCOFF()), TM(tm)
-: TargetLowering(tm, new TargetLoweringObjectFileCOFF())
+: TargetLowering(tm, new TMS320C64XTargetObjectFile())
 {
   addRegisterClass(MVT::i32, TMS320C64X::GPRegsRegisterClass);
   addRegisterClass(MVT::i32, TMS320C64X::ARegsRegisterClass);
