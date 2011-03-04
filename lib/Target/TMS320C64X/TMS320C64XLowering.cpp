@@ -164,6 +164,69 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setLibcallName(RTLIB::UDIV_I32, "__divu");
   setLibcallName(RTLIB::UREM_I32, "__remu");
 
+  // Support for FP lib from TI
+  //
+  // Single-precision floating-point arithmetic.
+  setLibcallName(RTLIB::ADD_F32, "_addf");
+  setLibcallName(RTLIB::SUB_F32, "_subf");
+  setLibcallName(RTLIB::MUL_F32, "_mpyf");
+  setLibcallName(RTLIB::DIV_F32, "_divf");
+
+  // Double-precision floating-point arithmetic.
+  setLibcallName(RTLIB::ADD_F64, "_addd");
+  setLibcallName(RTLIB::SUB_F64, "_subd");
+  setLibcallName(RTLIB::MUL_F64, "_mpyd");
+  setLibcallName(RTLIB::DIV_F64, "_divd");
+
+  // Single-precision comparisons.
+  setLibcallName(RTLIB::OEQ_F32, "_cmpf");
+  setLibcallName(RTLIB::UNE_F32, "_cmpf");
+  setLibcallName(RTLIB::OLT_F32, "_cmpf");
+  setLibcallName(RTLIB::OLE_F32, "_cmpf");
+  setLibcallName(RTLIB::OGE_F32, "_cmpf");
+  setLibcallName(RTLIB::OGT_F32, "_cmpf");
+  setLibcallName(RTLIB::UO_F32,  "_not_implemented");
+  setLibcallName(RTLIB::O_F32,   "_not_implemented");
+
+  setCmpLibcallCC(RTLIB::OEQ_F32, ISD::SETEQ);
+  setCmpLibcallCC(RTLIB::UNE_F32, ISD::SETNE);
+  setCmpLibcallCC(RTLIB::OLT_F32, ISD::SETLT);
+  setCmpLibcallCC(RTLIB::OLE_F32, ISD::SETLE);
+  setCmpLibcallCC(RTLIB::OGE_F32, ISD::SETGE);
+  setCmpLibcallCC(RTLIB::OGT_F32, ISD::SETGT);
+
+  // Double-precision comparisons.
+  setLibcallName(RTLIB::OEQ_F64, "_cmpd");
+  setLibcallName(RTLIB::UNE_F64, "_cmpd");
+  setLibcallName(RTLIB::OLT_F64, "_cmpd");
+  setLibcallName(RTLIB::OLE_F64, "_cmpd");
+  setLibcallName(RTLIB::OGE_F64, "_cmpd");
+  setLibcallName(RTLIB::OGT_F64, "_cmpd");
+  setLibcallName(RTLIB::UO_F64,  "_not_implemented");
+  setLibcallName(RTLIB::O_F64,   "_not_implemented");
+
+  setCmpLibcallCC(RTLIB::OEQ_F64, ISD::SETEQ);
+  setCmpLibcallCC(RTLIB::UNE_F64, ISD::SETNE);
+  setCmpLibcallCC(RTLIB::OLT_F64, ISD::SETLT);
+  setCmpLibcallCC(RTLIB::OLE_F64, ISD::SETLE);
+  setCmpLibcallCC(RTLIB::OGE_F64, ISD::SETGE);
+  setCmpLibcallCC(RTLIB::OGT_F64, ISD::SETGT);
+
+  // Conversions between floating types.
+  setLibcallName(RTLIB::FPROUND_F64_F32, "_cvtdf");
+  setLibcallName(RTLIB::FPEXT_F32_F64,   "_cvtfd");
+
+  // Floating-point to integer conversions.
+  setLibcallName(RTLIB::FPTOSINT_F64_I32, "_fixdi");
+  setLibcallName(RTLIB::FPTOUINT_F64_I32, "_fixdu");
+  setLibcallName(RTLIB::FPTOSINT_F32_I32, "_fixfi");
+  setLibcallName(RTLIB::FPTOUINT_F32_I32, "_fixfu");
+
+  // Integer to floating-point conversions.
+  setLibcallName(RTLIB::SINTTOFP_I32_F64, "_fltid");
+  setLibcallName(RTLIB::SINTTOFP_I32_F32, "_fltif");
+
+
   // We can generate two conditional instructions for select, not so
   // easy for select_cc
   setOperationAction(ISD::SELECT, MVT::i32, Custom);
