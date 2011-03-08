@@ -30,7 +30,7 @@ using namespace llvm;
 TMS320C64XMCAsmInfo::TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT) {
 
   GlobalDirective = "\t.global\t";
-  Data16bitsDirective = "\t.hword\t";
+  Data16bitsDirective = "\t.half\t";
   Data32bitsDirective = "\t.word\t";
 	Data64bitsDirective = 0;
   ZeroDirective = "\t.zero\t";
