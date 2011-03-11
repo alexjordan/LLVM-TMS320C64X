@@ -273,6 +273,9 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setOperationAction(ISD::VACOPY, MVT::Other, Expand);
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
 
+  // We want to custom lower some of our intrinsics.
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i1, Custom);
+
   setStackPointerRegisterToSaveRestore(TMS320C64X::A15);
   computeRegisterProperties();
   return;
@@ -735,6 +738,8 @@ TMS320C64XLowering::LowerOperation(SDValue op,  SelectionDAG &DAG) const {
       return LowerVASTART(op, DAG);
     case ISD::VAARG:
       return LowerVAARG(op, DAG);
+    case ISD::INTRINSIC_WO_CHAIN:
+      return LowerIfConv(op, DAG);
     default:
       llvm_unreachable(op.getNode()->getOperationName().c_str());
   }
@@ -987,4 +992,33 @@ SDValue TMS320C64XLowering::LowerVAARG(SDValue op, SelectionDAG &DAG) const {
   // Actually load the argument
   return DAG.getLoad(
     vt, op.getDebugLoc(), chain, loadptr, MachinePointerInfo(), false, false, 4);
+}
+
+SDValue
+TMS320C64XLowering::LowerIfConv(SDValue op, SelectionDAG &DAG) const
+{
+	MachineFunction &MF = DAG.getMachineFunction();
+	MachineRegisterInfo &RegInfo = MF.getRegInfo();
+  DebugLoc dl = op.getDebugLoc();
+  unsigned IntNo = cast<ConstantSDNode>(op.getOperand(0))->getZExtValue();
+  assert (IntNo == Intrinsic::vliw_ifconv_t);
+  //assert(DAG.getRoot()->getOpcode() == ISD::BR);
+
+
+	// Operand 1 is true/false, selects operand 2 or 3 respectively
+	// We'll generate this with two conditional move instructions - moving
+	// the true/false result to the same register. In theory these could
+	// be scheduled in the same insn packet (given that only one will
+	// execute out of the pair, due to the conditional)
+
+	SDValue ops[4];
+	ops[0] = op.getOperand(2); // true val
+	ops[1] = op.getOperand(3); // false val
+	ops[2] = DAG.getTargetConstant(0, MVT::i32); // always 0 ?
+	ops[3] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(1)); // condition
+	return DAG.getNode(TMSISD::SELECT, op.getDebugLoc(), MVT::i32, ops, 4);
+  //unsigned reg = RegInfo.createVirtualRegister(&GPRegsRegClass);
+  //SDValue Chain = DAG.getCopyToReg(DAG.getEntryNode(), dl, reg, op.getOperand(3));
+  //Chain = DAG.getCopyToReg(Chain, dl, reg, op.getOperand(2));
+  //return DAG.getCopyFromReg(Chain, dl, reg, MVT::i32);
 }

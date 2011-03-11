@@ -343,6 +343,7 @@ Pass *createCorrelatedValuePropagationPass();
 FunctionPass *createInstructionSimplifierPass();
 extern char &InstructionSimplifierID;
 
+FunctionPass *createPredicationPass();
 } // End llvm namespace
 
 #endif

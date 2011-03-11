@@ -3145,6 +3145,7 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
   // Add all operands of the call to the operand list.
   for (unsigned i = 0, e = I.getNumArgOperands(); i != e; ++i) {
     SDValue Op = getValue(I.getArgOperand(i));
+    // XXX don't worry, I custom lower it later
     assert(TLI.isTypeLegal(Op.getValueType()) &&
            "Intrinsic uses a non-legal type?");
     Ops.push_back(Op);

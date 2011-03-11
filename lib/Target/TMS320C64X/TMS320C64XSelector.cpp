@@ -317,6 +317,66 @@ bool TMS320C64XInstSelectorPass::bounce_predicate(SDNode *&op,
 
 //-----------------------------------------------------------------------------
 
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
+#include <deque>
+
+namespace {
+  bool topo_less(SDNode *A, SDNode *B) {
+    return A->getNodeId() < B->getNodeId();
+  }
+  void postDom(SDNode *N, SDNode *Op, unsigned numNodes, std::set<SDNode*> &InPostDom) {
+    std::set<SDNode*> Seen;
+    std::deque<SDNode*> Worklist;
+
+    InPostDom.insert(N);
+    Seen.insert(N);
+    Worklist.push_back(Op);
+    while (Worklist.size()) {
+      // highest node ID (ie. lowest node in DAG) next
+      SDNode *current = Worklist.back(); Worklist.pop_back();
+
+      if (Seen.count(current))
+        continue;
+
+      bool escapes = false;
+      // iterate successors
+      for (SDNode::use_iterator UI = current->use_begin(),
+          UE = current->use_end(); UI != UE; ++UI) {
+        if (UI.getUse().getValueType() != MVT::i32)
+          continue;
+        SDNode *user = *UI;
+
+        // check if a value escapes
+        if (!InPostDom.count(user)) {
+          escapes = true;
+          break;
+        }
+      }
+
+      if (!escapes)
+        InPostDom.insert(current);
+      Seen.insert(current);
+
+      // add operands to the worklist
+      for (SDNode::op_iterator OI = current->op_begin(),
+          OE = current->op_end(); OI != OE; ++OI) {
+        if (OI->getValueType() != MVT::i32)
+          continue;
+        Worklist.push_back(OI->getNode());
+      }
+
+      // topological sort
+      std::sort(Worklist.begin(), Worklist.end(), topo_less);
+    }
+  }
+}
+
+SDNode * TMS320C64XInstSelectorPass::Select(SDNode *op) {
+  return SelectCode(op);
+}
+
 void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
 
   using namespace TMS320C64X;
@@ -327,10 +387,40 @@ void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
     bug->apply(CurDAG);
     delete bug;
   }
+
+  // set predicates
+  SelectionDAG::allnodes_iterator I, E;
+  for (I = CurDAG->allnodes_begin(), E = CurDAG->allnodes_end(); I != E; ++I) {
+    SDNode *N = &*I;
+    if (N->isMachineOpcode() && N->getMachineOpcode() == TMS320C64X::mvselect)
+      break;
+  }
+  if (I == E)
+    return;
+
+  SDNode *MVS = &*I;
+
+  dbgs() << "found mvselect\n";
+
+  std::set<SDNode*> PostDoms;
+  postDom(MVS, MVS->getOperand(1).getNode(), CurDAG->allnodes_size(), PostDoms);
+  for (std::set<SDNode*>::iterator I = PostDoms.begin(),
+       E = PostDoms.end(); I != E; ++I) {
+    dbgs() << "in-post-dom: ";
+    (*I)->dump(CurDAG);
+    dbgs() << "\n";
+
+    SDNode *N = *I;
+    if (N == MVS || !N->isMachineOpcode())
+      continue;
+
+#if PREDICATE
+    // predicate reg is expected to be last operand
+    if (N->getNumOperands() == 3)
+      CurDAG->UpdateNodeOperands(SDValue(N,0), N->getOperand(0),
+          CurDAG->getTargetConstant(1, MVT::i32),
+          MVS->getOperand(3));
+#endif
+  }
 }
 
-//-----------------------------------------------------------------------------
-
-SDNode * TMS320C64XInstSelectorPass::Select(SDNode *op) {
-  return SelectCode(op);
-}
