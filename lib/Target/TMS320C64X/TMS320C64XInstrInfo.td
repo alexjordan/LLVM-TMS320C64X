@@ -410,7 +410,7 @@ def cmpltu_p_rr : pseudo_rr<"cmpltu", ".L1", unit_l, cmpltu_node, 0>;
 // parallel stuff, which we're avoiding for now
 
 def mvselect : nopred_inst<(outs GPRegs:$dst), (ins GPRegs:$reg, GPRegs:$src1),
-		"mv\t.S1\t$reg,\t$dst", [], 0, unit_s> {
+		"mv\t\t$reg,\t$dst", [], 0, unit_s> {
 	let Constraints = "$src1 = $dst";
 }
 
