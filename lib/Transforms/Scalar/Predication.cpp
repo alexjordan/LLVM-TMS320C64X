@@ -156,25 +156,54 @@ static Value *GetIfCondition(BasicBlock *BB,
   return 0;
 }
 
-// hack: extend all args of the intrinsic to 32 bits
-static Value *ext32(Function &F, Value *V, BasicBlock::iterator Insert) {
-  LLVMContext &Context = F.getContext();
-  const Type *Ty = Type::getInt32Ty(Context);
-  if (V->getType() == Ty)
-    return V;
-  Value *XV = CastInst::CreateZExtOrBitCast(V, Ty, "", Insert);
-  XV->setName(V->getName());
-  return XV;
+static bool canConvert(BasicBlock *BB, std::set<Instruction*> *SideEffectInsts) {
+  for (BasicBlock::iterator BBI = BB->begin(), BBE = BB->end(); BBI != BBE; ++BBI) {
+    Instruction *I = BBI;
+
+    if (I->isTerminator())
+      break; // ok, checked elsewhere
+
+    if (I->isSafeToSpeculativelyExecute())
+      continue;
+    switch (I->getOpcode()) {
+    default:
+      DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
+      return false;
+    case Instruction::Store:
+      SideEffectInsts->insert(I);
+      break;
+    }
+  }
+  return true;
 }
 
-static Value *truncTo(Value *V, const Value *T, BasicBlock::iterator Insert) {
-  const Type *Ty = T->getType();
-  if (V->getType() == Ty)
-    return V;
-  Value *TV = CastInst::CreateTruncOrBitCast(V, Ty, "", Insert);
-  TV->setName(V->getName());
-  return TV;
+static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
+  BasicBlock *BB = I->getParent();
+  LLVMContext &ctx = I->getContext();
+  StoreInst *St = dyn_cast<StoreInst>(I);
+  assert(St);
+
+  Value *Mem = St->getPointerOperand();
+
+  Module *M = BB->getParent()->getParent();
+
+  /*
+  const Type *i8Ptr = Type::getInt8PtrTy(St->getContext());
+  if (Mem->getType() != i8Ptr)
+    Mem = new BitCastInst(Mem, i8Ptr, Mem->getName(), I);
+    */
+
+  const Type *Ty = Mem->getType();
+  Function *PredStore =
+    Intrinsic::getDeclaration(M, Intrinsic::vliw_predicate_store, &Ty, 1);
+  Value *Ops[] = {
+    (IsTrue ? ConstantInt::getTrue(ctx) : ConstantInt::getFalse(ctx)),
+    Cond, Mem };
+  // insert intrinsic before store, then swap places
+  Instruction *P = CallInst::Create(PredStore, Ops, Ops + 3, "",  I);
+  I->moveBefore(P);
 }
+
 
 bool convertPHIs(BasicBlock *BB, PHINode *PN) {
   BasicBlock *IfTrue, *IfFalse;
@@ -197,24 +226,36 @@ bool convertPHIs(BasicBlock *BB, PHINode *PN) {
     IfBlock1 = Pred;
     DomBlock = *pred_begin(Pred);
   }
-
   Pred = PN->getIncomingBlock(1);
   if (cast<BranchInst>(Pred->getTerminator())->isUnconditional()) {
     IfBlock2 = Pred;
     DomBlock = *pred_begin(Pred);
   }
 
+  std::set<Instruction*> SideEffectInsts[2];
+  bool TruePred[2];
+
   if (IfBlock1) {
+    if (!canConvert(IfBlock1, &SideEffectInsts[0]))
+      return false;
+
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
         IfBlock1->getInstList(),
         IfBlock1->begin(),
         IfBlock1->getTerminator());
+
+    TruePred[0] = IfBlock1 == IfTrue;
   }
   if (IfBlock2) {
+    if (!canConvert(IfBlock2, &SideEffectInsts[1]))
+      return false;
+
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
         IfBlock2->getInstList(),
         IfBlock2->begin(),
         IfBlock2->getTerminator());
+
+    TruePred[1] = IfBlock1 == IfTrue;
   }
 
   if (IfBlock1 && IfBlock2)
@@ -226,6 +267,13 @@ bool convertPHIs(BasicBlock *BB, PHINode *PN) {
   else
     DEBUG(dbgs() << "LOPSIDED CONVERSION\n");
 
+  for (int i = 0; i < 2; ++i) {
+    DEBUG(dbgs() << SideEffectInsts[i].size() << " to predicate in block " << i << "\n");
+    for (std::set<Instruction*>::iterator SI = SideEffectInsts[i].begin(),
+         SE = SideEffectInsts[i].end(); SI != SE; ++SI)
+      predicateInst(*SI, IfCond, TruePred[i]);
+  }
+
   while (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
     // Change the PHI node into a select instruction.
     Value *TrueVal =
@@ -235,16 +283,13 @@ bool convertPHIs(BasicBlock *BB, PHINode *PN) {
 
     //Value *NV = SelectInst::Create(IfCond, TrueVal, FalseVal, "", AfterPHIIt);
     Module *M = F.getParent();
-    Function *IfConvF = Intrinsic::getDeclaration(M, Intrinsic::vliw_ifconv_t);
-    Value *Ops[] = {
-      ext32(F, IfCond, AfterPHIIt),
-      ext32(F, TrueVal, AfterPHIIt),
-      ext32(F, FalseVal, AfterPHIIt) };
+    const Type *Ty = TrueVal->getType();
+    Function *IfConvF = Intrinsic::getDeclaration(M, Intrinsic::vliw_ifconv_t, &Ty, 1);
+    Value *Ops[] = { IfCond, TrueVal, FalseVal };
     Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi", AfterPHIIt);
 
-    NV = truncTo(NV, PN, AfterPHIIt);
-    PN->replaceAllUsesWith(NV);
     NV->takeName(PN);
+    PN->replaceAllUsesWith(NV);
 
     BB->getInstList().erase(PN);
   }

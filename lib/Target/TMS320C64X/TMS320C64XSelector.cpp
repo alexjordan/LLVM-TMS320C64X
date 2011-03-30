@@ -377,6 +377,44 @@ SDNode * TMS320C64XInstSelectorPass::Select(SDNode *op) {
   return SelectCode(op);
 }
 
+static void
+setStorePredicate(SDNode *N, SelectionDAG *dag) {
+  const TargetInstrInfo *TII = dag->getTarget().getInstrInfo();
+
+  // follow chain to store
+  SDValue stval = N->getOperand(2);
+  SDNode *S = stval.getNode();
+  const TargetInstrDesc &tid = TII->get(S->getMachineOpcode());
+
+  assert(tid.TSFlags & TMS320C64XII::is_memaccess &&
+      tid.TSFlags & TMS320C64XII::is_store);
+
+  SmallVector<SDValue, 8> Ops;
+
+  // loop over all operands, stop at the first predicate operand
+  unsigned opNum = 0;
+  for (; opNum < S->getNumOperands(); ++opNum) {
+    if (tid.OpInfo[opNum].isPredicate())
+      break;
+    Ops.push_back(S->getOperand(opNum));
+  }
+
+  assert((int) opNum < (tid.NumOperands - 1) && "2 pred-ops expected");
+
+  // set the predicate regs
+  Ops.push_back(N->getOperand(0)); // predicate true/false bit
+  Ops.push_back(N->getOperand(1)); // condition from PRED_STORE node
+  opNum += 2;
+
+  // add remaining ops (possibly a chain op)
+  for (; opNum < S->getNumOperands(); ++opNum)
+    Ops.push_back(S->getOperand(opNum));
+
+  dag->UpdateNodeOperands(stval, &Ops[0], Ops.size());
+
+  // XXX how to disappear node N gracefully?
+}
+
 void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
 
   using namespace TMS320C64X;
@@ -392,8 +430,17 @@ void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
   SelectionDAG::allnodes_iterator I, E;
   for (I = CurDAG->allnodes_begin(), E = CurDAG->allnodes_end(); I != E; ++I) {
     SDNode *N = &*I;
-    if (N->isMachineOpcode() && N->getMachineOpcode() == TMS320C64X::mvselect)
-      break;
+    if (!N->isMachineOpcode())
+      continue;
+    switch (N->getMachineOpcode()) {
+      default: continue;
+      case TMS320C64X::pred_store:
+        setStorePredicate(N, CurDAG);
+        break;
+      case TMS320C64X::mvselect:
+        // continue with handling select
+        break;
+    }
   }
   if (I == E)
     return;

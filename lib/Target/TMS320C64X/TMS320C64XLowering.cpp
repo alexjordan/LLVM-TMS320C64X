@@ -275,6 +275,10 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
 
   // We want to custom lower some of our intrinsics.
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i1, Custom);
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i16, Custom);
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i32, Custom);
+
+  setOperationAction(ISD::INTRINSIC_VOID, MVT::i1, Custom);
 
   setStackPointerRegisterToSaveRestore(TMS320C64X::A15);
   computeRegisterProperties();
@@ -323,8 +327,14 @@ const char *TMS320C64XLowering::getTargetNodeName(unsigned op) const {
     case TMSISD::RETURN_LABEL_OPERAND:
       return "TMSISD::RETURN_LABEL_OPERAND";
 
+    case TMSISD::SELECT:
+      return "TMSISD::SELECT";
+
     case TMSISD::WRAPPER:
       return "TMSISD::WRAPPER";
+
+    case TMSISD::PRED_STORE:
+      return "TMSISD::PRED_STORE";
   }
 }
 
@@ -740,6 +750,8 @@ TMS320C64XLowering::LowerOperation(SDValue op,  SelectionDAG &DAG) const {
       return LowerVAARG(op, DAG);
     case ISD::INTRINSIC_WO_CHAIN:
       return LowerIfConv(op, DAG);
+    case ISD::INTRINSIC_VOID:
+      return LowerIntrinsicVoid(op, DAG);
     default:
       llvm_unreachable(op.getNode()->getOperationName().c_str());
   }
@@ -994,6 +1006,8 @@ SDValue TMS320C64XLowering::LowerVAARG(SDValue op, SelectionDAG &DAG) const {
     vt, op.getDebugLoc(), chain, loadptr, MachinePointerInfo(), false, false, 4);
 }
 
+// This lowers the INTRINSIC_WO_CHAIN node used for if conversion.
+// Right now the semantics are the same as SELECT's
 SDValue
 TMS320C64XLowering::LowerIfConv(SDValue op, SelectionDAG &DAG) const
 {
@@ -1012,13 +1026,42 @@ TMS320C64XLowering::LowerIfConv(SDValue op, SelectionDAG &DAG) const
 	// execute out of the pair, due to the conditional)
 
 	SDValue ops[4];
-	ops[0] = op.getOperand(2); // true val
-	ops[1] = op.getOperand(3); // false val
+	ops[0] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(2)); // true val
+	ops[1] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(3)); // false val
 	ops[2] = DAG.getTargetConstant(0, MVT::i32); // always 0 ?
 	ops[3] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(1)); // condition
-	return DAG.getNode(TMSISD::SELECT, op.getDebugLoc(), MVT::i32, ops, 4);
+  return DAG.getNode(TMSISD::SELECT, dl, MVT::i32, ops, 4);
   //unsigned reg = RegInfo.createVirtualRegister(&GPRegsRegClass);
   //SDValue Chain = DAG.getCopyToReg(DAG.getEntryNode(), dl, reg, op.getOperand(3));
   //Chain = DAG.getCopyToReg(Chain, dl, reg, op.getOperand(2));
   //return DAG.getCopyFromReg(Chain, dl, reg, MVT::i32);
+}
+
+// Lower the predicated store intrinsic to a pseudo node
+SDValue
+TMS320C64XLowering::LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const
+{
+	MachineFunction &MF = DAG.getMachineFunction();
+  DebugLoc dl = op.getDebugLoc();
+  unsigned IntNo = cast<ConstantSDNode>(op.getOperand(1))->getZExtValue();
+  assert (IntNo == Intrinsic::vliw_predicate_store);
+
+  ConstantSDNode *Const = dyn_cast<ConstantSDNode>(op.getOperand(2));
+  assert(Const);
+  bool pred_bit = (bool)Const->getSExtValue();
+
+	SDValue ops[3];
+	ops[0] = op.getOperand(0); // chain
+	ops[1] = DAG.getTargetConstant(pred_bit, MVT::i32); // predicate true/false bit
+	ops[2] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(3)); // condition
+  return DAG.getNode(TMSISD::PRED_STORE, dl, MVT::Other, ops, 3);
+}
+
+// We want custom lower based on args and return value, this seems to do it
+void TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
+                                             SmallVectorImpl<SDValue>&Results,
+                                             SelectionDAG &DAG) {
+  SDValue Res = LowerOperation(SDValue(N, 0), DAG);
+  if (Res.getNode())
+    Results.push_back(Res);
 }

@@ -52,7 +52,8 @@ enum {
   RETURN_LABEL,
   RETURN_LABEL_OPERAND,
   SELECT,
-  WRAPPER
+  WRAPPER,
+  PRED_STORE
 };
 }
 
@@ -108,7 +109,11 @@ class TMS320C64XLowering : public TargetLowering {
                             const SmallVectorImpl<ISD::InputArg> &Ins,
                             DebugLoc dl,
                             SelectionDAG &DAG,
-			    SmallVectorImpl<SDValue> &InVals) const;
+                            SmallVectorImpl<SDValue> &InVals) const;
+
+    void ReplaceNodeResults(SDNode *N,
+                            SmallVectorImpl<SDValue>&Results,
+                            SelectionDAG &DAG);
 
     virtual SDValue LowerOperation(SDValue op, SelectionDAG &DAG) const;
 
@@ -125,6 +130,7 @@ class TMS320C64XLowering : public TargetLowering {
     SDValue LowerVASTART(SDValue op, SelectionDAG &DAG) const;
     SDValue LowerVAARG(SDValue op, SelectionDAG &DAG) const;
     SDValue LowerIfConv(SDValue op, SelectionDAG &DAG) const;
+    SDValue LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const;
 
     std::pair<SDValue,bool> ConvertSETCC(SDValue op, SelectionDAG &DAG) const;
 };

@@ -574,3 +574,10 @@ let MemShift = 2 in {
   defm word : c64strictload<"w">;
   defm word : c64store<"w">;
 }
+
+// predication support
+def SDT_tmspredstore : SDTypeProfile<0, 2, [SDTCisInt<0>, SDTCisSameAs<1,0>]>;
+def tmspredstore : SDNode<"TMSISD::PRED_STORE", SDT_tmspredstore, [SDNPHasChain]>;
+def pred_store : pseudoinst<(outs), (ins i32imm:$pbit, GPRegs:$cond), "${:comment} PREDSTORE",
+		[(tmspredstore timm:$pbit, GPRegs:$cond)]> {
+}
