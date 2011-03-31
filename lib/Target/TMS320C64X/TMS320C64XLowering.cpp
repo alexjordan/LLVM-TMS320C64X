@@ -128,6 +128,9 @@ static bool CC_TMS320C64X_Custom(unsigned &ValNo,
 TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
 : TargetLowering(tm, new TMS320C64XTargetObjectFile())
 {
+  // Bool is represented in i32 by 0 or 1
+  setBooleanContents(ZeroOrOneBooleanContent);
+
   addRegisterClass(MVT::i32, TMS320C64X::GPRegsRegisterClass);
   addRegisterClass(MVT::i32, TMS320C64X::ARegsRegisterClass);
   addRegisterClass(MVT::i32, TMS320C64X::BRegsRegisterClass);
@@ -236,6 +239,7 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
 
   // Manually beat condition code setting into cmps
+  setOperationAction(ISD::SETCC, MVT::i1, Custom);
   setOperationAction(ISD::SETCC, MVT::i32, Custom);
 
   // We can emulate br_cc, maybe not brcond, do what works
@@ -865,8 +869,8 @@ TMS320C64XLowering::ConvertSETCC(SDValue op, SelectionDAG &DAG) const {
   unsigned int opcode;
   bool NegateCC = false;
 
-  SDValue lhs = op.getOperand(0);
-  SDValue rhs = op.getOperand(1);
+  SDValue lhs = PromoteBoolean(op.getOperand(0), DAG);
+  SDValue rhs = PromoteBoolean(op.getOperand(1), DAG);
 
   ISD::CondCode cc = cast<CondCodeSDNode>(op.getOperand(2))->get();
 
@@ -1046,13 +1050,9 @@ TMS320C64XLowering::LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const
   unsigned IntNo = cast<ConstantSDNode>(op.getOperand(1))->getZExtValue();
   assert (IntNo == Intrinsic::vliw_predicate_store);
 
-  ConstantSDNode *Const = dyn_cast<ConstantSDNode>(op.getOperand(2));
-  assert(Const);
-  bool pred_bit = (bool)Const->getSExtValue();
-
 	SDValue ops[3];
 	ops[0] = op.getOperand(0); // chain
-	ops[1] = DAG.getTargetConstant(pred_bit, MVT::i32); // predicate true/false bit
+	ops[1] = PromoteBoolean(op.getOperand(2), DAG); // predicate true/false bit
 	ops[2] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(3)); // condition
   return DAG.getNode(TMSISD::PRED_STORE, dl, MVT::Other, ops, 3);
 }
@@ -1064,4 +1064,16 @@ void TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
   SDValue Res = LowerOperation(SDValue(N, 0), DAG);
   if (Res.getNode())
     Results.push_back(Res);
+}
+
+SDValue TMS320C64XLowering::PromoteBoolean(SDValue op, SelectionDAG &DAG) {
+  if (op->getValueType(0) != MVT::i1)
+    return op;
+
+  ConstantSDNode *Const = dyn_cast<ConstantSDNode>(op);
+  if (Const)
+    return DAG.getTargetConstant(Const->getSExtValue() ? 1 : 0, MVT::i32);
+
+  assert(false && "promote non-const");
+  return op;
 }
