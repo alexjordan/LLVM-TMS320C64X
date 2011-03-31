@@ -10,6 +10,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Pass.h"
 #include "llvm/Target/TargetData.h"
@@ -331,27 +332,32 @@ bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
 
   BasicBlock *Pred = *PI;
 
+  std::set<Instruction*> SideEffectInsts;
+  if (!canConvert(Pred, &SideEffectInsts))
+    return false;
+
+  BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
+  assert(BI->isConditional());
+  bool TruePred;
+  if (BI->getSuccessor(0) == Pred)
+    TruePred = true;
+  else if (BI->getSuccessor(1) == Pred)
+    TruePred = false;
+  else
+    llvm_unreachable("broken cycle");
+
   DEBUG(dbgs() << "CONVERT SIMPLE CYCLE\n");
   BB->getInstList().splice(BB->getTerminator(),
       Pred->getInstList(),
       Pred->begin(),
       Pred->getTerminator());
 
+  DEBUG(dbgs() << SideEffectInsts.size() << " to predicate in block " << Pred << "\n");
+  for (std::set<Instruction*>::iterator SI = SideEffectInsts.begin(),
+       SE = SideEffectInsts.end(); SI != SE; ++SI)
+    predicateInst(*SI, BI->getCondition(), TruePred);
+
   return true;
-
-#if 0
-  // assign predecessors
-  BasicBlock *Self = *pred_begin(BB);
-  BasicBlock *Other = *++pred_begin(BB);
-  if (Self != BB)
-    std::swap(Self, Other); // shuffle into place
-
-  if (Self != BB)
-    return false; // no cycle, no conversion
-
-#endif
-
-  return false;
 }
 
 bool PredicationPass::simplify(Function &F) {
