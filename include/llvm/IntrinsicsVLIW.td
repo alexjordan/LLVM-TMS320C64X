@@ -3,6 +3,6 @@ let TargetPrefix = "vliw" in {  // All intrinsics start with "llvm.vliw.".
     Intrinsic<[llvm_anyint_ty],
               [llvm_i1_ty, LLVMMatchType<0>, LLVMMatchType<0>], [IntrNoMem]>;
 
-  def int_vliw_predicate_store :
+  def int_vliw_predicate_mem :
     Intrinsic<[llvm_void_ty], [llvm_i1_ty, llvm_i1_ty, llvm_anyptr_ty], []>;
 }

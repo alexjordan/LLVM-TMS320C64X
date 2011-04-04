@@ -281,6 +281,7 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i1, Custom);
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i16, Custom);
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i32, Custom);
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
 
   setOperationAction(ISD::INTRINSIC_VOID, MVT::i1, Custom);
 
@@ -1048,7 +1049,7 @@ TMS320C64XLowering::LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const
 	MachineFunction &MF = DAG.getMachineFunction();
   DebugLoc dl = op.getDebugLoc();
   unsigned IntNo = cast<ConstantSDNode>(op.getOperand(1))->getZExtValue();
-  assert (IntNo == Intrinsic::vliw_predicate_store);
+  assert (IntNo == Intrinsic::vliw_predicate_mem);
 
 	SDValue ops[3];
 	ops[0] = op.getOperand(0); // chain

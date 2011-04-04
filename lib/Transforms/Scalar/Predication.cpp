@@ -196,7 +196,7 @@ static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
 
   const Type *Ty = Mem->getType();
   Function *PredStore =
-    Intrinsic::getDeclaration(M, Intrinsic::vliw_predicate_store, &Ty, 1);
+    Intrinsic::getDeclaration(M, Intrinsic::vliw_predicate_mem, &Ty, 1);
   Value *Ops[] = {
     (IsTrue ? ConstantInt::getTrue(ctx) : ConstantInt::getFalse(ctx)),
     Cond, Mem };

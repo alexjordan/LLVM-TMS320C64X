@@ -378,7 +378,7 @@ SDNode * TMS320C64XInstSelectorPass::Select(SDNode *op) {
 }
 
 static void
-setStorePredicate(SDNode *N, SelectionDAG *dag) {
+setMemPredicate(SDNode *N, SelectionDAG *dag) {
   const TargetInstrInfo *TII = dag->getTarget().getInstrInfo();
 
   // follow chain to store
@@ -386,15 +386,17 @@ setStorePredicate(SDNode *N, SelectionDAG *dag) {
   SDNode *S = stval.getNode();
   const TargetInstrDesc &tid = TII->get(S->getMachineOpcode());
 
-  assert(tid.TSFlags & TMS320C64XII::is_memaccess &&
-      tid.TSFlags & TMS320C64XII::is_store);
+  assert(tid.TSFlags & TMS320C64XII::is_memaccess);
 
   SmallVector<SDValue, 8> Ops;
+  unsigned NumResults = 1; // load has one result
+  if (tid.TSFlags & TMS320C64XII::is_store)
+    NumResults = 0; // store has no results
 
   // loop over all operands, stop at the first predicate operand
   unsigned opNum = 0;
   for (; opNum < S->getNumOperands(); ++opNum) {
-    if (tid.OpInfo[opNum].isPredicate())
+    if (tid.OpInfo[opNum + NumResults].isPredicate())
       break;
     Ops.push_back(S->getOperand(opNum));
   }
@@ -435,7 +437,7 @@ void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
     switch (N->getMachineOpcode()) {
       default: continue;
       case TMS320C64X::pred_store:
-        setStorePredicate(N, CurDAG);
+        setMemPredicate(N, CurDAG);
         break;
       case TMS320C64X::mvselect:
         // continue with handling select
