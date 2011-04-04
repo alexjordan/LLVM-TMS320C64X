@@ -171,6 +171,7 @@ static bool canConvert(BasicBlock *BB, std::set<Instruction*> *SideEffectInsts) 
       DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
       return false;
     case Instruction::Store:
+    case Instruction::Load:
       SideEffectInsts->insert(I);
       break;
     }
@@ -181,27 +182,27 @@ static bool canConvert(BasicBlock *BB, std::set<Instruction*> *SideEffectInsts) 
 static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
   BasicBlock *BB = I->getParent();
   LLVMContext &ctx = I->getContext();
-  StoreInst *St = dyn_cast<StoreInst>(I);
-  assert(St);
-
-  Value *Mem = St->getPointerOperand();
-
   Module *M = BB->getParent()->getParent();
 
-  /*
-  const Type *i8Ptr = Type::getInt8PtrTy(St->getContext());
-  if (Mem->getType() != i8Ptr)
-    Mem = new BitCastInst(Mem, i8Ptr, Mem->getName(), I);
-    */
+
+  Value *Mem;
+
+  if (StoreInst *St = dyn_cast<StoreInst>(I))
+    Mem = St->getPointerOperand();
+  else if(LoadInst *Ld = dyn_cast<LoadInst>(I))
+    Mem = Ld->getPointerOperand();
+  else
+    llvm_unreachable("can only predicate load/store");
 
   const Type *Ty = Mem->getType();
-  Function *PredStore =
+  Function *PredMem =
     Intrinsic::getDeclaration(M, Intrinsic::vliw_predicate_mem, &Ty, 1);
   Value *Ops[] = {
     (IsTrue ? ConstantInt::getTrue(ctx) : ConstantInt::getFalse(ctx)),
     Cond, Mem };
-  // insert intrinsic before store, then swap places
-  Instruction *P = CallInst::Create(PredStore, Ops, Ops + 3, "",  I);
+
+  // insert intrinsic before instruction, then swap places
+  Instruction *P = CallInst::Create(PredMem, Ops, Ops + 3, "",  I);
   I->moveBefore(P);
 }
 
