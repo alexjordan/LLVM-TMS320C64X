@@ -1058,10 +1058,19 @@ TMS320C64XLowering::LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const
   return DAG.getNode(TMSISD::PRED_STORE, dl, MVT::Other, ops, 3);
 }
 
-// We want custom lower based on args and return value, this seems to do it
 void TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
                                              SmallVectorImpl<SDValue>&Results,
                                              SelectionDAG &DAG) {
+  // Catch all intrinsics here that we want to custom lower, but not any other
+  // nodes that LLVM promotes/expands/etc.
+  switch (N->getOpcode()) {
+    default: return;
+
+    case ISD::INTRINSIC_WO_CHAIN:
+    case ISD::INTRINSIC_VOID:
+      break;
+  }
+
   SDValue Res = LowerOperation(SDValue(N, 0), DAG);
   if (Res.getNode())
     Results.push_back(Res);
