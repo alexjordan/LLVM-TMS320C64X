@@ -9,6 +9,7 @@
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/CFG.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -20,6 +21,10 @@
 using namespace llvm;
 
 STATISTIC(NumSimpl, "Number of conditions predicated");
+
+static cl::opt<bool>
+DumpCFG("pred-dot-cfg", cl::init(false), cl::Hidden,
+  cl::desc("Dump annotated graph."));
 
 namespace {
   struct PredicationPass : public FunctionPass {
@@ -36,6 +41,7 @@ namespace {
     bool convertPHICycle(BasicBlock *BB, PHINode *PN);
     bool predicate(Function &F);
     bool simplify(Function &F);
+    bool dumpGraph(Function &F);
   };
 }
 
@@ -415,6 +421,9 @@ bool PredicationPass::predicate(Function &F) {
 }
 
 bool PredicationPass::runOnFunction(Function &F) {
+  if (DumpCFG)
+    dumpGraph(F);
+
   bool Changed;
   do {
     Changed = predicate(F);
@@ -423,6 +432,7 @@ bool PredicationPass::runOnFunction(Function &F) {
 
   return true;
 }
+
 #if 0
   const TargetData *TD = getAnalysisIfAvailable<TargetData>();
   bool EverChanged = RemoveUnreachableBlocksFromFn(F);
@@ -446,3 +456,52 @@ bool PredicationPass::runOnFunction(Function &F) {
   } while (EverChanged);
 #endif
 
+//
+// Graph Output
+//
+
+#include "llvm/Support/GraphWriter.h"
+
+namespace {
+  static LoopInfo *WriterLI;
+}
+
+namespace llvm {
+template<>
+struct DOTGraphTraits<const Function*> : public DefaultDOTGraphTraits {
+
+  DOTGraphTraits() : DefaultDOTGraphTraits() {}
+  DOTGraphTraits(bool foo) : DefaultDOTGraphTraits() {}
+
+  static std::string getGraphName(const Function *F) {
+    return "CFG for '" + F->getNameStr() + "' function";
+  }
+
+  std::string getNodeLabel(const BasicBlock *Node,
+                           const Function *Graph) {
+    std::string Str;
+    raw_string_ostream OS(Str);
+
+    WriteAsOperand(OS, Node, false);
+    OS << " (" << WriterLI->getLoopDepth(Node) << ")";
+    return OS.str();
+  }
+};
+}
+
+bool PredicationPass::dumpGraph(Function &F) {
+  std::string Filename = "cfg.pred." + F.getNameStr() + ".dot";
+  errs() << "Writing '" << Filename << "'...";
+
+  std::string ErrorInfo;
+  raw_fd_ostream File(Filename.c_str(), ErrorInfo);
+
+  WriterLI = &getAnalysis<LoopInfo>();
+
+  if (ErrorInfo.empty())
+    WriteGraph(File, (const Function*)&F);
+  else
+    errs() << "  error opening file for writing!";
+  errs() << "\n";
+  return false;
+}
