@@ -18,6 +18,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include <list>
 using namespace llvm;
 
 STATISTIC(NumSimpl, "Number of conditions predicated");
@@ -37,9 +38,18 @@ namespace {
       AU.addPreserved<LoopInfo>();
     }
 
+    struct IfInfo {
+      Value *Condition;
+      BasicBlock *IfTrue;
+      BasicBlock *IfFalse;
+    };
+
+    std::set<BasicBlock*> BlocksToPredicate;
+
     virtual bool runOnFunction(Function &F);
     bool convertPHICycle(BasicBlock *BB, PHINode *PN);
     bool predicate(Function &F);
+    bool predicateTopDown(Function &F);
     bool simplify(Function &F);
     bool dumpGraph(Function &F);
   };
@@ -426,6 +436,160 @@ bool PredicationPass::predicate(Function &F) {
       }
   }
   return Changed;
+}
+
+static void redirectBranch(BasicBlock *BB, BasicBlock *Old, BasicBlock *New) {
+  BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
+  assert(BI);
+  for (unsigned i = 0; i < BI->getNumSuccessors(); ++i) {
+    if (BI->getSuccessor(i) == Old)
+      BI->setSuccessor(i, New);
+  }
+}
+
+bool PredicationPass::predicateTopDown(Function &F) {
+  DominatorTree &DT = getAnalysis<DominatorTree>();
+
+  // BFS
+  std::list<BasicBlock*> Worklist;
+  std::set<BasicBlock*> Seen;
+  std::vector<IfInfo> IfInfos;
+  std::map<BasicBlock*, IfInfo*> Block2If;
+
+  BasicBlock *DomParent = NULL;
+  BasicBlock *BB = &*F.begin();
+  Worklist.push_back(BB);
+
+  while (Worklist.size()) {
+    BB = Worklist.front(); Worklist.pop_front();
+    if (Seen.count(BB))
+      continue;
+
+    DEBUG(dbgs() << "BB: " << BB->getName() << "\n");
+    if (BlocksToPredicate.count(BB)) {
+      DomParent = BB;
+      break;
+    }
+
+
+    TerminatorInst *TI = BB->getTerminator();
+    assert(TI);
+    for (unsigned i = 0; i < TI->getNumSuccessors(); ++i)
+      Worklist.push_back(TI->getSuccessor(i));
+    Seen.insert(BB);
+  }
+
+  if (!DomParent)
+    return false;
+
+  DEBUG(dbgs() << "DomParent: " << DomParent->getName() << "\n");
+
+  // start again
+  Worklist.clear(); Seen.clear();
+  Worklist.push_back(DomParent);
+  while (Worklist.size()) {
+    BB = Worklist.front(); Worklist.pop_front();
+    if (Seen.count(BB))
+      continue;
+    Seen.insert(BB);
+
+    // handle join outside the merge region
+    typedef std::map<std::set<BasicBlock*>, BasicBlock*> BBMergeMap_t;
+    BBMergeMap_t MergeMap;
+    BasicBlock::iterator PHIIt = BB->begin();
+    while (PHINode *PN = dyn_cast<PHINode>(PHIIt++)) {
+      std::set<BasicBlock*> Incoming;
+      std::vector<int> ValueNums;
+      for (int i = 0, e = PN->getNumIncomingValues(); i < e; ++i) {
+        BasicBlock *IB = PN->getIncomingBlock(i);
+        if (BlocksToPredicate.count(IB)) {
+          Incoming.insert(IB);
+          ValueNums.push_back(i);
+        }
+      }
+      if (Incoming.size()) {
+        assert(Incoming.size() == 2);
+        BasicBlock *MergeBB = NULL;
+        BBMergeMap_t::iterator BBMMIt = MergeMap.find(Incoming);
+        if (BBMMIt == MergeMap.end()) {
+          // insert a merge block
+          MergeBB = BasicBlock::Create(F.getContext(), "merge", &F, BB);
+          BranchInst::Create(BB, MergeBB);
+          DEBUG(dbgs() << "Merge Incoming: ");
+          for(std::set<BasicBlock*>::iterator I = Incoming.begin(),
+              E = Incoming.end(); I != E; ++I) {
+            DEBUG(dbgs() << (*I)->getName() << " ");
+            redirectBranch(*I, BB, MergeBB);
+          }
+          DEBUG(dbgs() << "\n");
+          MergeMap.insert(std::make_pair(Incoming, MergeBB));
+        } else {
+          // there already is a merge block
+          MergeBB = BBMMIt->second;
+        }
+        int i = ValueNums[0]; // assume: i == true-branch
+        int j = ValueNums[1]; // j == false-branch
+        // find dominating block (XXX recalculate DT??)
+        BasicBlock *CommonDom = DT.findNearestCommonDominator(
+            PN->getIncomingBlock(i), PN->getIncomingBlock(j));
+        assert(CommonDom);
+        IfInfo *ii = Block2If[CommonDom];
+        if (!DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)))
+          std::swap(i, j); // it's the other way around
+        assert(DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
+        assert(DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
+
+        Value *TrueVal = PN->getIncomingValue(i);
+        Value *FalseVal = PN->getIncomingValue(j);
+
+        Module *M = F.getParent();
+        const Type *Ty = TrueVal->getType();
+        Function *IfConvF = Intrinsic::getDeclaration(M,
+            Intrinsic::vliw_ifconv_t, &Ty, 1);
+        Value *Ops[] = { ii->Condition, TrueVal, FalseVal };
+        Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi",
+            MergeBB->getTerminator());
+
+        // replace phi operands
+        PN->removeIncomingValue(ValueNums[1], false);
+        PN->removeIncomingValue(ValueNums[0], false);
+        PN->addIncoming(NV, MergeBB);
+        //NV->takeName(PN);
+      }
+    }
+
+    if (!BlocksToPredicate.count(BB))
+      continue;
+
+    if (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
+      assert(false && "cannot handle PHI inside merge area yet");
+    }
+
+    if (BB != DomParent) {
+      DEBUG(dbgs() << "Hoisting: " << BB->getName() << "\n");
+      DomParent->getInstList().splice(DomParent->getTerminator(),
+          BB->getInstList(),
+          BB->begin(),
+          BB->getTerminator());
+    }
+    BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
+    assert(BI);
+    if (BI->isConditional()) {
+      DEBUG(dbgs() << "Found If: " << *BI << "\n");
+      IfInfo ii;
+      ii.Condition = BI->getCondition();
+      ii.IfTrue = BI->getSuccessor(0);
+      ii.IfFalse = BI->getSuccessor(1);
+      Worklist.push_back(ii.IfTrue);
+      Worklist.push_back(ii.IfFalse);
+      IfInfos.push_back(ii);
+      Block2If.insert(std::make_pair(BB, &IfInfos[IfInfos.size() - 1]));
+    }
+    else
+      Worklist.push_back(BI->getSuccessor(0));
+  }
+
+  return false;
 }
 
 bool PredicationPass::runOnFunction(Function &F) {
