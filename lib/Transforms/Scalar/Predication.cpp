@@ -176,6 +176,14 @@ static bool canConvert(BasicBlock *BB, std::set<Instruction*> *SideEffectInsts) 
     default:
       DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
       return false;
+    case Instruction::Call: {
+      CallInst *call = dyn_cast<CallInst>(I);
+      Function *callee = call->getCalledFunction();
+      if (!callee || !callee->isIntrinsic() ||
+          callee->getIntrinsicID() != Intrinsic::vliw_ifconv_t)
+        return false;
+      break;
+    }
     case Instruction::Store:
     case Instruction::Load:
       SideEffectInsts->insert(I);
