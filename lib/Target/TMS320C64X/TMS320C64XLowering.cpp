@@ -1042,7 +1042,7 @@ TMS320C64XLowering::LowerIfConv(SDValue op, SelectionDAG &DAG) const
   //return DAG.getCopyFromReg(Chain, dl, reg, MVT::i32);
 }
 
-// Lower the predicated store intrinsic to a pseudo node
+// Lower the predication intrinsic to a pseudo node
 SDValue
 TMS320C64XLowering::LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const
 {
