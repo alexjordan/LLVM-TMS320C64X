@@ -28,6 +28,8 @@ DumpCFG("pred-dot-cfg", cl::init(false), cl::Hidden,
   cl::desc("Dump annotated graph."));
 
 namespace {
+  struct IfConvBlockInfo;
+
   struct PredicationPass : public FunctionPass {
     static char ID; // Pass identification, replacement for typeid
     PredicationPass() : FunctionPass(ID) {}
@@ -48,10 +50,36 @@ namespace {
 
     virtual bool runOnFunction(Function &F);
     bool convertPHICycle(BasicBlock *BB, PHINode *PN);
+    bool convertPHIs(BasicBlock *BB, PHINode *PN);
     bool predicate(Function &F);
     bool predicateTopDown(Function &F);
+    void analyze(BasicBlock *BB, IfConvBlockInfo &info);
     bool simplify(Function &F);
     bool dumpGraph(Function &F);
+  };
+
+  class Oracle {
+  public:
+    // initialize with block info from the host block
+    Oracle(const IfConvBlockInfo &host) {}
+    // ask whether (another) block should be converted into host
+    bool shouldConvert(const IfConvBlockInfo &info);
+  };
+
+  struct IfConvBlockInfo {
+    bool Convertible;
+    unsigned NumInstructions;
+    std::set<Instruction*> SideEffectInsts;
+    std::string Name;
+    IfConvBlockInfo() : Convertible(false), NumInstructions(0) {}
+    void dump() {
+      dbgs() << "--- Block: " << Name << " -------\n";
+      dbgs() << "Convertible: " << (Convertible ? "true" : "false") << "\n";
+      dbgs() << "Instructions: " << NumInstructions << "\n";
+      dbgs() << "Instructions w/ side-effects: "
+        << SideEffectInsts.size() << "\n";
+      dbgs() << "---------------------\n";
+    }
   };
 }
 
@@ -65,6 +93,7 @@ FunctionPass *llvm::createPredicationPass() {
 
 /// ChangeToUnreachable - Insert an unreachable instruction before the specified
 /// instruction, making it and the rest of the code in the block dead.
+#if 0
 static void ChangeToUnreachable(Instruction *I) {
   BasicBlock *BB = I->getParent();
   // Loop over all of the successors, removing BB's entry from any PHI
@@ -82,7 +111,7 @@ static void ChangeToUnreachable(Instruction *I) {
     BB->getInstList().erase(BBI++);
   }
 }
-
+#endif
 
 /// GetIfCondition - Given a basic block (BB) with two predecessors (and
 /// presumably PHI nodes in it), check to see if the merge at this block is due
@@ -173,34 +202,39 @@ static Value *GetIfCondition(BasicBlock *BB,
   return 0;
 }
 
-static bool canConvert(BasicBlock *BB, std::set<Instruction*> *SideEffectInsts) {
+void PredicationPass::analyze(BasicBlock *BB, IfConvBlockInfo &info) {
+  info.Name = BB->getNameStr();
+  info.Convertible = true;
   for (BasicBlock::iterator BBI = BB->begin(), BBE = BB->end(); BBI != BBE; ++BBI) {
     Instruction *I = BBI;
 
-    if (I->isTerminator())
-      break; // ok, checked elsewhere
+    if (I->isTerminator() || I->getOpcode() == Instruction::PHI)
+      break; // ok for us, branch semantics checked elsewhere
+
+    // count as instruction
+    ++info.NumInstructions;
 
     if (I->isSafeToSpeculativelyExecute())
       continue;
     switch (I->getOpcode()) {
     default:
       DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
-      return false;
+      info.Convertible = false;
+      break;
     case Instruction::Call: {
       CallInst *call = dyn_cast<CallInst>(I);
       Function *callee = call->getCalledFunction();
       if (!callee || !callee->isIntrinsic() ||
           callee->getIntrinsicID() != Intrinsic::vliw_ifconv_t)
-        return false;
+        info.Convertible = false;
       break;
     }
     case Instruction::Store:
     case Instruction::Load:
-      SideEffectInsts->insert(I);
+      info.SideEffectInsts.insert(I);
       break;
     }
   }
-  return true;
 }
 
 static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
@@ -231,7 +265,7 @@ static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
 }
 
 
-bool convertPHIs(BasicBlock *BB, PHINode *PN) {
+bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
   BasicBlock *IfTrue, *IfFalse;
   Function &F = *BB->getParent();
 
@@ -258,11 +292,16 @@ bool convertPHIs(BasicBlock *BB, PHINode *PN) {
     DomBlock = *pred_begin(Pred);
   }
 
-  std::set<Instruction*> SideEffectInsts[2];
+  IfConvBlockInfo DomBlockInfo, BBInfo[2];
   bool TruePred[2];
 
+  analyze(DomBlock, DomBlockInfo);
+  Oracle oracle(DomBlockInfo);
+
   if (IfBlock1) {
-    if (!canConvert(IfBlock1, &SideEffectInsts[0]))
+    analyze(IfBlock1, BBInfo[0]);
+    DEBUG(BBInfo[0].dump());
+    if (!oracle.shouldConvert(BBInfo[0]))
       return false;
 
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
@@ -273,7 +312,9 @@ bool convertPHIs(BasicBlock *BB, PHINode *PN) {
     TruePred[0] = IfBlock1 == IfTrue;
   }
   if (IfBlock2) {
-    if (!canConvert(IfBlock2, &SideEffectInsts[1]))
+    analyze(IfBlock2, BBInfo[1]);
+    DEBUG(BBInfo[1].dump());
+    if (!oracle.shouldConvert(BBInfo[1]))
       return false;
 
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
@@ -294,9 +335,8 @@ bool convertPHIs(BasicBlock *BB, PHINode *PN) {
     DEBUG(dbgs() << "LOPSIDED CONVERSION\n");
 
   for (int i = 0; i < 2; ++i) {
-    DEBUG(dbgs() << SideEffectInsts[i].size() << " to predicate in block " << i << "\n");
-    for (std::set<Instruction*>::iterator SI = SideEffectInsts[i].begin(),
-         SE = SideEffectInsts[i].end(); SI != SE; ++SI)
+    for (std::set<Instruction*>::iterator SI = BBInfo[i].SideEffectInsts.begin(),
+         SE = BBInfo[i].SideEffectInsts.end(); SI != SE; ++SI)
       predicateInst(*SI, IfCond, TruePred[i]);
   }
 
@@ -357,8 +397,11 @@ bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
 
   BasicBlock *Pred = *PI;
 
-  std::set<Instruction*> SideEffectInsts;
-  if (!canConvert(Pred, &SideEffectInsts))
+  IfConvBlockInfo HostInfo, PredInfo;
+  analyze(BB, HostInfo);
+  analyze(Pred, PredInfo);
+  Oracle oracle(HostInfo);
+  if (!oracle.shouldConvert(PredInfo))
     return false;
 
   BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
@@ -377,9 +420,9 @@ bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
       Pred->begin(),
       Pred->getTerminator());
 
-  DEBUG(dbgs() << SideEffectInsts.size() << " to predicate in block " << Pred << "\n");
-  for (std::set<Instruction*>::iterator SI = SideEffectInsts.begin(),
-       SE = SideEffectInsts.end(); SI != SE; ++SI)
+  DEBUG(PredInfo.dump());
+  for (std::set<Instruction*>::iterator SI = PredInfo.SideEffectInsts.begin(),
+       SE = PredInfo.SideEffectInsts.end(); SI != SE; ++SI)
     predicateInst(*SI, BI->getCondition(), TruePred);
 
   return true;
@@ -636,6 +679,18 @@ bool PredicationPass::runOnFunction(Function &F) {
     EverChanged |= RemoveUnreachableBlocksFromFn(F);
   } while (EverChanged);
 #endif
+
+bool Oracle::shouldConvert(const IfConvBlockInfo &info) {
+  // simple and state-less: do not convert any larger than 10 insts.
+  if (!info.Convertible)
+    return false;
+
+  if (info.NumInstructions > 10) {
+    DEBUG(dbgs() << info.Name <<  "too big (" << info.NumInstructions << ")\n");
+    return false;
+  }
+  return true;
+}
 
 //
 // Graph Output
