@@ -278,7 +278,7 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
 
   BasicBlock::iterator AfterPHIIt = BB->begin();
   while (isa<PHINode>(AfterPHIIt))
-    PHINode *PN = cast<PHINode>(AfterPHIIt++);
+    AfterPHIIt++;
 
   BasicBlock *DomBlock = 0, *IfBlock1 = 0, *IfBlock2 = 0;
   BasicBlock *Pred = PN->getIncomingBlock(0);
@@ -496,7 +496,7 @@ bool PredicationPass::predicateTopDown(Function &F) {
   // BFS
   std::list<BasicBlock*> Worklist;
   std::set<BasicBlock*> Seen;
-  std::vector<IfInfo> IfInfos;
+  std::vector<IfInfo*> IfInfos;
   std::map<BasicBlock*, IfInfo*> Block2If;
 
   BasicBlock *DomParent = NULL;
@@ -531,83 +531,147 @@ bool PredicationPass::predicateTopDown(Function &F) {
   Worklist.clear(); Seen.clear();
   Worklist.push_back(DomParent);
   while (Worklist.size()) {
+topo_tryagain:
     BB = Worklist.front(); Worklist.pop_front();
     if (Seen.count(BB))
       continue;
+    for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
+      BasicBlock *PredBB = *PI;
+      if (!Seen.count(PredBB)) {
+        // unseen predecessor -> not in topological order
+        Worklist.push_back(BB);
+        goto topo_tryagain;
+      }
+    }
     Seen.insert(BB);
 
-    // handle join outside the merge region
-    typedef std::map<std::set<BasicBlock*>, BasicBlock*> BBMergeMap_t;
-    BBMergeMap_t MergeMap;
-    BasicBlock::iterator PHIIt = BB->begin();
-    while (PHINode *PN = dyn_cast<PHINode>(PHIIt++)) {
+    // don't touch these blocks other than fixing PHIs
+    if (!BlocksToPredicate.count(BB)) {
+      // handle join outside the merge region
+      typedef std::map<std::set<BasicBlock*>, BasicBlock*> BBMergeMap_t;
+      BBMergeMap_t MergeMap;
+      BasicBlock::iterator PHIIt = BB->begin();
+      while (PHINode *PN = dyn_cast<PHINode>(PHIIt++)) {
+        std::set<BasicBlock*> Incoming;
+        std::vector<int> ValueNums;
+        for (int i = 0, e = PN->getNumIncomingValues(); i < e; ++i) {
+          BasicBlock *IB = PN->getIncomingBlock(i);
+          if (BlocksToPredicate.count(IB)) {
+            Incoming.insert(IB);
+            ValueNums.push_back(i);
+          }
+        }
+        if (Incoming.size()) {
+          assert(Incoming.size() == 2);
+          BasicBlock *MergeBB = NULL;
+          BBMergeMap_t::iterator BBMMIt = MergeMap.find(Incoming);
+          if (BBMMIt == MergeMap.end()) {
+            // insert a merge block
+            MergeBB = BasicBlock::Create(F.getContext(), "merge", &F, BB);
+            BranchInst::Create(BB, MergeBB);
+            DEBUG(dbgs() << "Merge Incoming: ");
+            for(std::set<BasicBlock*>::iterator I = Incoming.begin(),
+                E = Incoming.end(); I != E; ++I) {
+              DEBUG(dbgs() << (*I)->getName() << " ");
+              redirectBranch(*I, BB, MergeBB);
+            }
+            DEBUG(dbgs() << "\n");
+            MergeMap.insert(std::make_pair(Incoming, MergeBB));
+          } else {
+            // there already is a merge block
+            MergeBB = BBMMIt->second;
+          }
+          int i = ValueNums[0]; // assume: i == true-branch
+          int j = ValueNums[1]; // j == false-branch
+
+          // find dominating block (XXX recalculate DT??)
+          BasicBlock *CommonDom = DT.findNearestCommonDominator(
+              PN->getIncomingBlock(i), PN->getIncomingBlock(j));
+          assert(CommonDom);
+          IfInfo *ii = Block2If[CommonDom];
+          if (!DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)))
+            std::swap(i, j); // it's the other way around
+          assert(DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
+          assert(DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
+
+          Value *TrueVal = PN->getIncomingValue(i);
+          Value *FalseVal = PN->getIncomingValue(j);
+
+          Module *M = F.getParent();
+          const Type *Ty = TrueVal->getType();
+          Function *IfConvF = Intrinsic::getDeclaration(M,
+              Intrinsic::vliw_ifconv_t, &Ty, 1);
+          Value *Ops[] = { ii->Condition, TrueVal, FalseVal };
+          Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi",
+              MergeBB->getTerminator());
+
+          // replace phi operands
+          PN->removeIncomingValue(ValueNums[1], false);
+          PN->removeIncomingValue(ValueNums[0], false);
+          PN->addIncoming(NV, MergeBB);
+          //NV->takeName(PN);
+        }
+      }
+      continue;
+    }
+
+    // handle join inside the merge region
+    while (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
+      DEBUG(dbgs() << "rewriting phi: " << *PN << "\n");
       std::set<BasicBlock*> Incoming;
       std::vector<int> ValueNums;
       for (int i = 0, e = PN->getNumIncomingValues(); i < e; ++i) {
-        BasicBlock *IB = PN->getIncomingBlock(i);
-        if (BlocksToPredicate.count(IB)) {
-          Incoming.insert(IB);
-          ValueNums.push_back(i);
-        }
+        Incoming.insert(PN->getIncomingBlock(i));
+        ValueNums.push_back(i);
       }
-      if (Incoming.size()) {
-        assert(Incoming.size() == 2);
-        BasicBlock *MergeBB = NULL;
-        BBMergeMap_t::iterator BBMMIt = MergeMap.find(Incoming);
-        if (BBMMIt == MergeMap.end()) {
-          // insert a merge block
-          MergeBB = BasicBlock::Create(F.getContext(), "merge", &F, BB);
-          BranchInst::Create(BB, MergeBB);
-          DEBUG(dbgs() << "Merge Incoming: ");
-          for(std::set<BasicBlock*>::iterator I = Incoming.begin(),
-              E = Incoming.end(); I != E; ++I) {
-            DEBUG(dbgs() << (*I)->getName() << " ");
-            redirectBranch(*I, BB, MergeBB);
-          }
-          DEBUG(dbgs() << "\n");
-          MergeMap.insert(std::make_pair(Incoming, MergeBB));
-        } else {
-          // there already is a merge block
-          MergeBB = BBMMIt->second;
-        }
-        int i = ValueNums[0]; // assume: i == true-branch
-        int j = ValueNums[1]; // j == false-branch
-        // find dominating block (XXX recalculate DT??)
-        BasicBlock *CommonDom = DT.findNearestCommonDominator(
-            PN->getIncomingBlock(i), PN->getIncomingBlock(j));
-        assert(CommonDom);
-        IfInfo *ii = Block2If[CommonDom];
-        if (!DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)))
-          std::swap(i, j); // it's the other way around
-        assert(DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
-        assert(DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
+      assert(Incoming.size() == 2); // simple if-join
 
-        Value *TrueVal = PN->getIncomingValue(i);
-        Value *FalseVal = PN->getIncomingValue(j);
+      int i = ValueNums[0]; // assume: i == true-branch
+      int j = ValueNums[1]; // j == false-branch
 
-        Module *M = F.getParent();
-        const Type *Ty = TrueVal->getType();
-        Function *IfConvF = Intrinsic::getDeclaration(M,
-            Intrinsic::vliw_ifconv_t, &Ty, 1);
-        Value *Ops[] = { ii->Condition, TrueVal, FalseVal };
-        Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi",
-            MergeBB->getTerminator());
+      // find dominating block (XXX recalculate DT??)
+      BasicBlock *CommonDom = DT.findNearestCommonDominator(
+          PN->getIncomingBlock(i), PN->getIncomingBlock(j));
+      assert(CommonDom);
+      assert(Block2If.count(CommonDom)); // Ifinfo must exist
+      IfInfo *ii = Block2If[CommonDom];
+      if (!DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)))
+        std::swap(i, j); // it's the other way around
+      assert(ii->IfTrue == BB || DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
+      assert(ii->IfFalse == BB || DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
 
-        // replace phi operands
-        PN->removeIncomingValue(ValueNums[1], false);
-        PN->removeIncomingValue(ValueNums[0], false);
-        PN->addIncoming(NV, MergeBB);
-        //NV->takeName(PN);
+      Value *TrueVal = PN->getIncomingValue(i);
+      Value *FalseVal = PN->getIncomingValue(j);
+
+      // fast-forward over PHI nodes
+      BasicBlock::iterator AfterPHIIt = BB->begin();
+      while (isa<PHINode>(AfterPHIIt))
+        AfterPHIIt++;
+
+      Module *M = F.getParent();
+      const Type *Ty = TrueVal->getType();
+      Function *IfConvF = Intrinsic::getDeclaration(M,
+          Intrinsic::vliw_ifconv_t, &Ty, 1);
+      if (!ii->Condition->getType()->isIntegerTy(1)) {
+        ii->Condition->dump();
+        assert(false);
       }
+      Value *Ops[] = { ii->Condition, TrueVal, FalseVal };
+      Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi", AfterPHIIt);
+
+      NV->takeName(PN);
+      PN->replaceAllUsesWith(NV);
+
+      BB->getInstList().erase(PN);
+
+      DEBUG(dbgs() << "to psi: " << *NV << "\n");
     }
 
-    if (!BlocksToPredicate.count(BB))
+    // stop at a return block
+    if (isa<ReturnInst>(BB->getTerminator()))
       continue;
 
-    if (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
-      assert(false && "cannot handle PHI inside merge area yet");
-    }
-
+    // hoist code for if-conversion
     if (BB != DomParent) {
       DEBUG(dbgs() << "Hoisting: " << BB->getName() << "\n");
       DomParent->getInstList().splice(DomParent->getTerminator(),
@@ -619,19 +683,23 @@ bool PredicationPass::predicateTopDown(Function &F) {
     assert(BI);
     if (BI->isConditional()) {
       DEBUG(dbgs() << "Found If: " << *BI << "\n");
-      IfInfo ii;
-      ii.Condition = BI->getCondition();
-      ii.IfTrue = BI->getSuccessor(0);
-      ii.IfFalse = BI->getSuccessor(1);
-      Worklist.push_back(ii.IfTrue);
-      Worklist.push_back(ii.IfFalse);
+      IfInfo *ii = new IfInfo;
+      ii->Condition = BI->getCondition();
+      ii->IfTrue = BI->getSuccessor(0);
+      ii->IfFalse = BI->getSuccessor(1);
+      Worklist.push_back(ii->IfTrue);
+      Worklist.push_back(ii->IfFalse);
       IfInfos.push_back(ii);
-      Block2If.insert(std::make_pair(BB, &IfInfos[IfInfos.size() - 1]));
+      Block2If.insert(std::make_pair(BB, ii));
     }
     else
       Worklist.push_back(BI->getSuccessor(0));
   }
 
+  // clean up
+  for (std::vector<IfInfo*>::iterator I = IfInfos.begin(), E = IfInfos.end();
+       I != E; ++ I)
+    delete *I;
   return false;
 }
 
@@ -645,12 +713,20 @@ bool PredicationPass::runOnFunction(Function &F) {
   //   Changed |= simplify(F);
   // } while (Changed);
 
+#if 0
   std::string HCStr[] = { "while.body", "if.then" };
   for (Function::iterator BBIt = ++F.begin(); BBIt != F.end(); ++BBIt) {
     BasicBlock *BB = &*BBIt;
     if (find(HCStr, HCStr + 2, BB->getNameStr()) != HCStr + 2)
       BlocksToPredicate.insert(BB);
   }
+#else
+  // predicate everything
+  for (Function::iterator BBIt = F.begin(); BBIt != F.end(); ++BBIt) {
+    BasicBlock *BB = &*BBIt;
+    BlocksToPredicate.insert(BB);
+  }
+#endif
 
   predicateTopDown(F);
 
