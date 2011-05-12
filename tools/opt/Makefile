@@ -8,6 +8,7 @@
 ##===----------------------------------------------------------------------===##
 LEVEL = ../..
 TOOLNAME = opt
+USES_CPLEX := 1
 
 LINK_COMPONENTS := bitreader bitwriter asmparser instrumentation scalaropts ipo
 

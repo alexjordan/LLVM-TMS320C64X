@@ -18,8 +18,11 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "IfConv.h"
+#include "GlobalIfConv.h"
 #include <list>
 using namespace llvm;
+using namespace IfConv;
 
 STATISTIC(NumSimpl, "Number of conditions predicated");
 
@@ -28,8 +31,6 @@ DumpCFG("pred-dot-cfg", cl::init(false), cl::Hidden,
   cl::desc("Dump annotated graph."));
 
 namespace {
-  struct IfConvBlockInfo;
-
   struct PredicationPass : public FunctionPass {
     static char ID; // Pass identification, replacement for typeid
     PredicationPass() : FunctionPass(ID) {}
@@ -53,25 +54,19 @@ namespace {
     bool convertPHIs(BasicBlock *BB, PHINode *PN);
     bool predicate(Function &F);
     bool predicateTopDown(Function &F);
-    void analyze(BasicBlock *BB, IfConvBlockInfo &info);
     bool simplify(Function &F);
     bool dumpGraph(Function &F);
   };
 
-  class Oracle {
-  public:
-    // initialize with block info from the host block
-    Oracle(const IfConvBlockInfo &host) {}
-    // ask whether (another) block should be converted into host
-    bool shouldConvert(const IfConvBlockInfo &info);
-  };
+}
 
-  struct IfConvBlockInfo {
+namespace IfConv {
+  struct BlockInfo {
     bool Convertible;
     unsigned NumInstructions;
     std::set<Instruction*> SideEffectInsts;
     std::string Name;
-    IfConvBlockInfo() : Convertible(false), NumInstructions(0) {}
+    BlockInfo() : Convertible(false), NumInstructions(0) {}
     void dump() {
       dbgs() << "--- Block: " << Name << " -------\n";
       dbgs() << "Convertible: " << (Convertible ? "true" : "false") << "\n";
@@ -202,41 +197,6 @@ static Value *GetIfCondition(BasicBlock *BB,
   return 0;
 }
 
-void PredicationPass::analyze(BasicBlock *BB, IfConvBlockInfo &info) {
-  info.Name = BB->getNameStr();
-  info.Convertible = true;
-  for (BasicBlock::iterator BBI = BB->begin(), BBE = BB->end(); BBI != BBE; ++BBI) {
-    Instruction *I = BBI;
-
-    if (I->isTerminator() || I->getOpcode() == Instruction::PHI)
-      break; // ok for us, branch semantics checked elsewhere
-
-    // count as instruction
-    ++info.NumInstructions;
-
-    if (I->isSafeToSpeculativelyExecute())
-      continue;
-    switch (I->getOpcode()) {
-    default:
-      DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
-      info.Convertible = false;
-      break;
-    case Instruction::Call: {
-      CallInst *call = dyn_cast<CallInst>(I);
-      Function *callee = call->getCalledFunction();
-      if (!callee || !callee->isIntrinsic() ||
-          callee->getIntrinsicID() != Intrinsic::vliw_ifconv_t)
-        info.Convertible = false;
-      break;
-    }
-    case Instruction::Store:
-    case Instruction::Load:
-      info.SideEffectInsts.insert(I);
-      break;
-    }
-  }
-}
-
 static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
   BasicBlock *BB = I->getParent();
   LLVMContext &ctx = I->getContext();
@@ -292,16 +252,16 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
     DomBlock = *pred_begin(Pred);
   }
 
-  IfConvBlockInfo DomBlockInfo, BBInfo[2];
+  BlockInfo DomBlockInfo, BBInfo[2];
   bool TruePred[2];
 
-  analyze(DomBlock, DomBlockInfo);
-  Oracle oracle(DomBlockInfo);
+  Oracle oracle;
+  oracle.analyze(DomBlock, DomBlockInfo);
 
   if (IfBlock1) {
-    analyze(IfBlock1, BBInfo[0]);
+    oracle.analyze(IfBlock1, BBInfo[0]);
     DEBUG(BBInfo[0].dump());
-    if (!oracle.shouldConvert(BBInfo[0]))
+    if (!oracle.shouldConvert(DomBlockInfo, BBInfo[0]))
       return false;
 
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
@@ -312,9 +272,9 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
     TruePred[0] = IfBlock1 == IfTrue;
   }
   if (IfBlock2) {
-    analyze(IfBlock2, BBInfo[1]);
+    oracle.analyze(IfBlock2, BBInfo[1]);
     DEBUG(BBInfo[1].dump());
-    if (!oracle.shouldConvert(BBInfo[1]))
+    if (!oracle.shouldConvert(DomBlockInfo, BBInfo[1]))
       return false;
 
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
@@ -397,11 +357,11 @@ bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
 
   BasicBlock *Pred = *PI;
 
-  IfConvBlockInfo HostInfo, PredInfo;
-  analyze(BB, HostInfo);
-  analyze(Pred, PredInfo);
-  Oracle oracle(HostInfo);
-  if (!oracle.shouldConvert(PredInfo))
+  BlockInfo HostInfo, PredInfo;
+  Oracle oracle;
+  oracle.analyze(BB, HostInfo);
+  oracle.analyze(Pred, PredInfo);
+  if (!oracle.shouldConvert(HostInfo, PredInfo))
     return false;
 
   BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
@@ -508,7 +468,7 @@ bool PredicationPass::predicateTopDown(Function &F) {
     if (Seen.count(BB))
       continue;
 
-    DEBUG(dbgs() << "BB: " << BB->getName() << "\n");
+    DEBUG(dbgs() << "top-down processing: " << BB->getName() << "\n");
     if (BlocksToPredicate.count(BB)) {
       DomParent = BB;
       break;
@@ -715,6 +675,26 @@ bool PredicationPass::runOnFunction(Function &F) {
     Changed |= simplify(F);
   } while (Changed);
 
+#if 1
+  Oracle orcl;
+  GlobalIfConv gif(F, orcl);
+  gif.solve(BlocksToPredicate);
+#else
+  // predicate everything
+  for (Function::iterator BBIt = F.begin(); BBIt != F.end(); ++BBIt) {
+    BasicBlock *BB = &*BBIt;
+    BlocksToPredicate.insert(BB);
+  }
+#endif
+
+  DEBUG(dbgs() << "BLOCKS FOR IF-CONVERSION:\n");
+  for (std::set<BasicBlock*>::iterator I = BlocksToPredicate.begin(),
+      E = BlocksToPredicate.end(); I != E; ++I)
+    DEBUG(dbgs() << (*I)->getNameStr() << "\n");
+  DEBUG(dbgs() << "END IF-CONVERSION BLOCKS\n");
+
+  predicateTopDown(F);
+
   return true;
 }
 
@@ -741,16 +721,64 @@ bool PredicationPass::runOnFunction(Function &F) {
   } while (EverChanged);
 #endif
 
-bool Oracle::shouldConvert(const IfConvBlockInfo &info) {
-  // simple and state-less: do not convert any larger than 10 insts.
-  if (!info.Convertible)
+bool
+IfConv::Oracle::shouldConvert(const BlockInfo &host, const BlockInfo &block) const {
+  // simple and state-less: do not convert any blocks larger than 10 insts.
+  if (!block.Convertible)
     return false;
 
-  if (info.NumInstructions > 10) {
-    DEBUG(dbgs() << info.Name <<  "too big (" << info.NumInstructions << ")\n");
+  if (block.NumInstructions > 10) {
+    DEBUG(dbgs() << block.Name <<  "too big (" << block.NumInstructions << ")\n");
     return false;
   }
   return true;
+}
+
+int
+IfConv::Oracle::getEdgeCost(llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) const {
+  BlockInfo srcInfo, dstInfo;
+  analyze(srcBB, srcInfo);
+  analyze(dstBB, dstInfo);
+
+  if (!dstInfo.Convertible || !srcInfo.Convertible)
+    return -10;
+
+  return 10;
+}
+
+void IfConv::Oracle::analyze(BasicBlock *BB, BlockInfo &info) const {
+  info.Name = BB->getNameStr();
+  info.Convertible = true;
+  for (BasicBlock::iterator BBI = BB->begin(), BBE = BB->end(); BBI != BBE; ++BBI) {
+    Instruction *I = BBI;
+
+    if (I->isTerminator() || I->getOpcode() == Instruction::PHI)
+      break; // ok for us, branch semantics checked elsewhere
+
+    // count as instruction
+    ++info.NumInstructions;
+
+    if (I->isSafeToSpeculativelyExecute())
+      continue;
+    switch (I->getOpcode()) {
+    default:
+      DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
+      info.Convertible = false;
+      break;
+    case Instruction::Call: {
+      CallInst *call = dyn_cast<CallInst>(I);
+      Function *callee = call->getCalledFunction();
+      if (!callee || !callee->isIntrinsic() ||
+          callee->getIntrinsicID() != Intrinsic::vliw_ifconv_t)
+        info.Convertible = false;
+      break;
+    }
+    case Instruction::Store:
+    case Instruction::Load:
+      info.SideEffectInsts.insert(I);
+      break;
+    }
+  }
 }
 
 //
