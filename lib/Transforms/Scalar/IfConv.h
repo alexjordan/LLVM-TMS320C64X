@@ -4,7 +4,14 @@
 #include "llvm/BasicBlock.h"
 
 namespace IfConv {
-  struct BlockInfo;
+  struct BlockInfo {
+    bool Convertible;
+    unsigned NumInstructions;
+    std::set<llvm::Instruction*> SideEffectInsts;
+    std::string Name;
+    BlockInfo() : Convertible(false), NumInstructions(0) {}
+    void dump();
+  };
 
   class Oracle {
   public:

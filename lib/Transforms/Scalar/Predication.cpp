@@ -60,24 +60,6 @@ namespace {
 
 }
 
-namespace IfConv {
-  struct BlockInfo {
-    bool Convertible;
-    unsigned NumInstructions;
-    std::set<Instruction*> SideEffectInsts;
-    std::string Name;
-    BlockInfo() : Convertible(false), NumInstructions(0) {}
-    void dump() {
-      dbgs() << "--- Block: " << Name << " -------\n";
-      dbgs() << "Convertible: " << (Convertible ? "true" : "false") << "\n";
-      dbgs() << "Instructions: " << NumInstructions << "\n";
-      dbgs() << "Instructions w/ side-effects: "
-        << SideEffectInsts.size() << "\n";
-      dbgs() << "---------------------\n";
-    }
-  };
-}
-
 char PredicationPass::ID = 0;
 static RegisterPass<PredicationPass> X("predication", "Predicate IFs");
 
@@ -740,9 +722,6 @@ IfConv::Oracle::getEdgeCost(llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) co
   analyze(srcBB, srcInfo);
   analyze(dstBB, dstInfo);
 
-  if (!dstInfo.Convertible || !srcInfo.Convertible)
-    return -10;
-
   return 10;
 }
 
@@ -779,6 +758,15 @@ void IfConv::Oracle::analyze(BasicBlock *BB, BlockInfo &info) const {
       break;
     }
   }
+}
+
+void IfConv::BlockInfo::dump() {
+      dbgs() << "--- Block: " << Name << " -------\n";
+      dbgs() << "Convertible: " << (Convertible ? "true" : "false") << "\n";
+      dbgs() << "Instructions: " << NumInstructions << "\n";
+      dbgs() << "Instructions w/ side-effects: "
+        << SideEffectInsts.size() << "\n";
+      dbgs() << "---------------------\n";
 }
 
 //
