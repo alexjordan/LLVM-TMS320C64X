@@ -561,7 +561,9 @@ topo_tryagain:
             ValueNums.push_back(i);
           }
         }
-        if (Incoming.size()) {
+        if (Incoming.size() > 1) {
+          // when Incoming.size() == 1 (ie. only one branch was hoisted), we
+          // leave the PHI node as it is and let CFG simplification handle it.
           assert(Incoming.size() == 2);
           BasicBlock *MergeBB = NULL;
           BBMergeMap_t::iterator BBMMIt = MergeMap.find(Incoming);
