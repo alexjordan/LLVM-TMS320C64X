@@ -206,6 +206,12 @@ static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
   I->moveBefore(P);
 }
 
+template<class InputIterator>
+static void predicateInsts(InputIterator I, InputIterator E,
+    Value *Cond, bool IsTrue) {
+  for (; I != E; ++I)
+    predicateInst(*I, Cond, IsTrue);
+}
 
 bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
   BasicBlock *IfTrue, *IfFalse;
@@ -274,13 +280,11 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
     return false;
   }
   else
-    DEBUG(dbgs() << "LOPSIDED CONVERSION\n");
+    DEBUG(dbgs() << "TRIANGLE CONVERSION\n");
 
-  for (int i = 0; i < 2; ++i) {
-    for (std::set<Instruction*>::iterator SI = BBInfo[i].SideEffectInsts.begin(),
-         SE = BBInfo[i].SideEffectInsts.end(); SI != SE; ++SI)
-      predicateInst(*SI, IfCond, TruePred[i]);
-  }
+  for (int i = 0; i < 2; ++i)
+    predicateInsts(BBInfo[i].SideEffectInsts.begin(),
+        BBInfo[i].SideEffectInsts.end(), IfCond, TruePred[i]);
 
   while (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
     // Change the PHI node into a select instruction.
@@ -363,9 +367,8 @@ bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
       Pred->getTerminator());
 
   DEBUG(PredInfo.dump());
-  for (std::set<Instruction*>::iterator SI = PredInfo.SideEffectInsts.begin(),
-       SE = PredInfo.SideEffectInsts.end(); SI != SE; ++SI)
-    predicateInst(*SI, BI->getCondition(), TruePred);
+  predicateInsts(PredInfo.SideEffectInsts.begin(),
+      PredInfo.SideEffectInsts.end(), BI->getCondition(), TruePred);
 
   return true;
 }
@@ -615,9 +618,27 @@ topo_tryagain:
     if (isa<ReturnInst>(BB->getTerminator()))
       continue;
 
-    // hoist code for if-conversion
+    // hoist code (if-conversion)
     if (BB != DomParent) {
       DEBUG(dbgs() << "Hoisting: " << BB->getName() << "\n");
+      Oracle oracle;
+      BlockInfo BBInfo;
+      oracle.analyze(BB, BBInfo);
+      assert(BBInfo.Convertible);
+
+#if 0
+      bool TruePred;
+      if (BI->getSuccessor(0) == Pred)
+        TruePred = true;
+      else if (BI->getSuccessor(1) == Pred)
+        TruePred = false;
+      else
+        llvm_unreachable("broken cycle");
+
+      predicateInsts(BBInfo.SideEffectInsts.begin(),
+          BBInfo.SideEffectInsts.end(), 
+#endif
+
       DomParent->getInstList().splice(DomParent->getTerminator(),
           BB->getInstList(),
           BB->begin(),
