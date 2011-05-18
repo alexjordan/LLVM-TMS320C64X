@@ -52,6 +52,7 @@ namespace {
     virtual bool runOnFunction(Function &F);
     bool convertPHICycle(BasicBlock *BB, PHINode *PN);
     bool convertPHIs(BasicBlock *BB, PHINode *PN);
+    Value *combinePredicates(BasicBlock *BB, std::vector<IfInfo*> &ii);
     bool predicate(Function &F);
     bool predicateTopDown(Function &F);
     bool simplify(Function &F);
@@ -211,6 +212,31 @@ static void predicateInsts(InputIterator I, InputIterator E,
     Value *Cond, bool IsTrue) {
   for (; I != E; ++I)
     predicateInst(*I, Cond, IsTrue);
+}
+
+// chain predicates together
+Value *PredicationPass::combinePredicates(BasicBlock *BB,
+    std::vector<IfInfo*> &IfInfos) {
+  DominatorTree &DT = getAnalysis<DominatorTree>();
+  Value *Chain = NULL;
+  for (std::vector<IfInfo*>::iterator I = IfInfos.begin(),
+      E = IfInfos.end(); I != E; ++I) {
+    IfInfo *ii = *I;
+    Instruction *insertIt = BB->getFirstNonPHI();
+    Value *pred;
+    if (DT.dominates(ii->IfFalse, BB))
+      pred = BinaryOperator::CreateNot(ii->Condition, "p", insertIt);
+    else if (DT.dominates(ii->IfTrue, BB))
+      pred = ii->Condition;
+    else
+      continue;
+
+    if (Chain)
+      Chain = BinaryOperator::CreateAnd(Chain, pred, "p", insertIt);
+    else
+      Chain = pred;
+  }
+  return Chain;
 }
 
 bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
@@ -626,18 +652,12 @@ topo_tryagain:
       oracle.analyze(BB, BBInfo);
       assert(BBInfo.Convertible);
 
-#if 0
-      bool TruePred;
-      if (BI->getSuccessor(0) == Pred)
-        TruePred = true;
-      else if (BI->getSuccessor(1) == Pred)
-        TruePred = false;
-      else
-        llvm_unreachable("broken cycle");
+      if (BBInfo.SideEffectInsts.size()) {
+        Value *P = combinePredicates(BB, IfInfos);
 
-      predicateInsts(BBInfo.SideEffectInsts.begin(),
-          BBInfo.SideEffectInsts.end(), 
-#endif
+        predicateInsts(BBInfo.SideEffectInsts.begin(),
+            BBInfo.SideEffectInsts.end(), P, true);
+      }
 
       DomParent->getInstList().splice(DomParent->getTerminator(),
           BB->getInstList(),
