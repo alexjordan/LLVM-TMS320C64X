@@ -7,6 +7,7 @@
 #include "llvm/Module.h"
 #include "llvm/Attributes.h"
 #include "llvm/Analysis/Dominators.h"
+#include "llvm/Analysis/IntervalPartition.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Support/CommandLine.h"
@@ -37,6 +38,7 @@ namespace {
 
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
       AU.addRequired<DominatorTree>();
+      AU.addRequired<IntervalPartition>();
       AU.addRequiredTransitive<LoopInfo>();
       AU.addPreserved<LoopInfo>();
     }
@@ -700,8 +702,30 @@ bool PredicationPass::runOnFunction(Function &F) {
 
 #if 1
   Oracle orcl;
-  GlobalIfConv gif(F, orcl);
-  gif.solve(BlocksToPredicate);
+  IntervalPartition &IP = getAnalysis<IntervalPartition>();
+  const std::vector<Interval*> &intervals = IP.getIntervals();
+  for (std::vector<Interval*>::const_iterator I = intervals.begin(),
+      E = intervals.end(); I != E; ++I) {
+    Interval *Int = *I;
+    if (Int->Nodes.size() < 4) {
+      DEBUG(dbgs() << "Trivial interval (start block: "
+          << Int->getHeaderNode()->getName() << ")\n");
+      continue;
+    }
+    DEBUG(dbgs() << "Interval (" << Int->getHeaderNode()->getName() << ") has "
+        << Int->Nodes.size() << " blocks\n");
+    GlobalIfConv gif(Int, orcl);
+    BlocksToPredicate.clear();
+    gif.solve(BlocksToPredicate);
+
+    DEBUG(dbgs() << "BLOCKS FOR IF-CONVERSION:\n");
+    for (std::set<BasicBlock*>::iterator I = BlocksToPredicate.begin(),
+        E = BlocksToPredicate.end(); I != E; ++I)
+      DEBUG(dbgs() << (*I)->getNameStr() << "\n");
+    DEBUG(dbgs() << "END IF-CONVERSION BLOCKS\n");
+
+    //predicateTopDown(F);
+  }
 #else
   // predicate everything
   for (Function::iterator BBIt = F.begin(); BBIt != F.end(); ++BBIt) {
@@ -709,14 +733,6 @@ bool PredicationPass::runOnFunction(Function &F) {
     BlocksToPredicate.insert(BB);
   }
 #endif
-
-  DEBUG(dbgs() << "BLOCKS FOR IF-CONVERSION:\n");
-  for (std::set<BasicBlock*>::iterator I = BlocksToPredicate.begin(),
-      E = BlocksToPredicate.end(); I != E; ++I)
-    DEBUG(dbgs() << (*I)->getNameStr() << "\n");
-  DEBUG(dbgs() << "END IF-CONVERSION BLOCKS\n");
-
-  predicateTopDown(F);
 
   return true;
 }

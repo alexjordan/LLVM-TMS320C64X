@@ -90,26 +90,31 @@ using namespace llvm;
 using namespace boost;
 using namespace CFGPartition;
 
-GlobalIfConv::GlobalIfConv(llvm::Function &F, const IfConv::Oracle &orcl)
+GlobalIfConv::GlobalIfConv(Interval *Int, const IfConv::Oracle &orcl)
   : cfgp(new CFGPartition::Problem) {
   std::map<const BasicBlock*, node_t> BlockMap;
 
+  // last block is the header of the next interval???
+  Int->Nodes.pop_back();
+
+  //Int->print(dbgs());
+
   // add blocks as vertices
-  for (Function::iterator BBIt = F.begin(); BBIt != F.end(); ++BBIt) {
-    BasicBlock *BB = &*BBIt;
+  BOOST_FOREACH(BasicBlock *BB, Int->Nodes) {
     node_t n = add_vertex(NodeProp(BB), cfgp->graph);
     orcl.analyze(BB, cfgp->graph[n].info);
     BlockMap[BB] = n;
   }
 
   // add edges between the blocks
-  for (Function::iterator BBIt = F.begin(); BBIt != F.end(); ++BBIt) {
-    BasicBlock *BB = &*BBIt;
+  BOOST_FOREACH(BasicBlock *BB, Int->Nodes) {
     if (BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator())) {
       assert(BlockMap.count(BB));
       unsigned i = 0, e = BI->getNumSuccessors();
       assert(e <= 2);
       for(; i < e; ++i) {
+        if (!Int->contains(BI->getSuccessor(i)))
+          continue;
         assert(BlockMap.count(BI->getSuccessor(i)));
         int cost = orcl.getEdgeCost(BB, BI->getSuccessor(i));
         add_edge(BlockMap[BB], BlockMap[BI->getSuccessor(i)],
