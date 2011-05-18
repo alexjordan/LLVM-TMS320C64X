@@ -709,28 +709,11 @@ bool PredicationPass::runOnFunction(Function &F) {
   if (DumpCFG)
     dumpGraph(F);
 
-  //bool Changed;
-  // do {
-  //   Changed = predicate(F);
-  //   Changed |= simplify(F);
-  // } while (Changed);
-
-#if 0
-  std::string HCStr[] = { "while.body", "if.then" };
-  for (Function::iterator BBIt = ++F.begin(); BBIt != F.end(); ++BBIt) {
-    BasicBlock *BB = &*BBIt;
-    if (find(HCStr, HCStr + 2, BB->getNameStr()) != HCStr + 2)
-      BlocksToPredicate.insert(BB);
-  }
-#else
-  // predicate everything
-  for (Function::iterator BBIt = F.begin(); BBIt != F.end(); ++BBIt) {
-    BasicBlock *BB = &*BBIt;
-    BlocksToPredicate.insert(BB);
-  }
-#endif
-
-  predicateTopDown(F);
+  bool Changed;
+  do {
+    Changed = predicate(F);
+    Changed |= simplify(F);
+  } while (Changed);
 
   return true;
 }
