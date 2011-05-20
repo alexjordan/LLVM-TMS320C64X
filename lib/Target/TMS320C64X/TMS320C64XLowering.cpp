@@ -1021,8 +1021,6 @@ TMS320C64XLowering::LowerIfConv(SDValue op, SelectionDAG &DAG) const
   DebugLoc dl = op.getDebugLoc();
   unsigned IntNo = cast<ConstantSDNode>(op.getOperand(0))->getZExtValue();
   assert (IntNo == Intrinsic::vliw_ifconv_t);
-  //assert(DAG.getRoot()->getOpcode() == ISD::BR);
-
 
 	// Operand 1 is true/false, selects operand 2 or 3 respectively
 	// We'll generate this with two conditional move instructions - moving
@@ -1035,11 +1033,13 @@ TMS320C64XLowering::LowerIfConv(SDValue op, SelectionDAG &DAG) const
 	ops[1] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(3)); // false val
 	ops[2] = DAG.getTargetConstant(0, MVT::i32); // always 0 ?
 	ops[3] = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, op.getOperand(1)); // condition
-  return DAG.getNode(TMSISD::SELECT, dl, MVT::i32, ops, 4);
-  //unsigned reg = RegInfo.createVirtualRegister(&GPRegsRegClass);
-  //SDValue Chain = DAG.getCopyToReg(DAG.getEntryNode(), dl, reg, op.getOperand(3));
-  //Chain = DAG.getCopyToReg(Chain, dl, reg, op.getOperand(2));
-  //return DAG.getCopyFromReg(Chain, dl, reg, MVT::i32);
+  SDValue Chain = DAG.getNode(TMSISD::SELECT, dl, MVT::i32, ops, 4);
+
+  // make sure the same we end up with the same type as the instrinsic (ie. i32
+  // by default or i1 through truncation)
+  if (op.getValueType() == MVT::i1)
+    Chain = DAG.getNode(ISD::TRUNCATE, dl, MVT::i1, Chain);
+  return Chain;
 }
 
 // Lower the predication intrinsic to a pseudo node
