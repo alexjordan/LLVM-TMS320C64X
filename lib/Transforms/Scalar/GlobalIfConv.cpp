@@ -36,9 +36,10 @@ namespace CFGPartition {
     std::string name;
     int weight;
     IfConv::BlockInfo info;
-    NodeProp() : weight(0) {}
+    bool border;
+    NodeProp() : weight(0), border(false) {}
     NodeProp(llvm::BasicBlock *bb, int w = 0)
-      : name(bb->getNameStr()), weight(w) {
+      : name(bb->getNameStr()), weight(w), border(false) {
       BBs.insert(bb);
     }
   };
@@ -69,8 +70,9 @@ namespace CFGPartition {
     };
 
     // branch & bound state
-    std::pair<Solution, int> Incumbent; // best solution and cost
+    std::pair<Solution, int> Incumbent; // best solution and its cost
     int LB; // lower bound
+    int Solved;
 
     void reduce(const Solution &s);
     void check(const Solution &s);
@@ -89,13 +91,14 @@ namespace CFGPartition {
 using namespace llvm;
 using namespace boost;
 using namespace CFGPartition;
+using namespace IfConv;
 
 GlobalIfConv::GlobalIfConv(Interval *Int, const IfConv::Oracle &orcl)
   : cfgp(new CFGPartition::Problem) {
   std::map<const BasicBlock*, node_t> BlockMap;
 
   // last block is the header of the next interval???
-  Int->Nodes.pop_back();
+  //Int->Nodes.pop_back();
 
   //Int->print(dbgs());
 
@@ -113,8 +116,10 @@ GlobalIfConv::GlobalIfConv(Interval *Int, const IfConv::Oracle &orcl)
       unsigned i = 0, e = BI->getNumSuccessors();
       assert(e <= 2);
       for(; i < e; ++i) {
-        if (!Int->contains(BI->getSuccessor(i)))
+        if (!Int->contains(BI->getSuccessor(i))) {
+          cfgp->graph[BlockMap[BB]].border = true;
           continue;
+        }
         assert(BlockMap.count(BI->getSuccessor(i)));
         int cost = orcl.getEdgeCost(BB, BI->getSuccessor(i));
         add_edge(BlockMap[BB], BlockMap[BI->getSuccessor(i)],
@@ -136,6 +141,8 @@ void GlobalIfConv::solve(std::set<BasicBlock*> &result) {
 
 CFGPartition::Problem::Problem()
   : Incumbent(std::make_pair(graph_t(), INT_MAX))
+  , LB(0)
+  , Solved(false)
 {
 }
 
@@ -158,17 +165,25 @@ void CFGPartition::Problem::check(const Solution &s) {
   dbgs() << "cost: " << cost << "\n";
   if (cost < Incumbent.second) {
     Incumbent = std::make_pair(s, cost);
-    dbgs() << "new incumbent\n";
+    DEBUG(dbgs() << "new incumbent\n");
+  }
+  if (cost <= LB) {
+    DEBUG(dbgs() << "solution reached LB\n");
+    Solved = true;
   }
 }
 
 void CFGPartition::Problem::reduce(const Solution &s) {
   BOOST_FOREACH(const node_t &v, vertices(s.graph)) {
-    if (!s.graph[v].info.Convertible) {
+    if (Solved)
+      return;
+
+    if (s.graph[v].border || !s.graph[v].info.Convertible) {
       DEBUG(dbgs() << "cannot collapse " << s.graph[v].name << "\n");
       continue;
     }
-    if (in_degree(v, s.graph) == 1) {
+    if (in_degree(v, s.graph) == 1
+        && out_degree(v, s.graph) == 1) {
       edge_t e = *in_edges(v, s.graph).first;
       node_t u = source(e, s.graph);
       dbgs() << "reduction: " << s.graph[v].name << " -> " << s.graph[u].name
