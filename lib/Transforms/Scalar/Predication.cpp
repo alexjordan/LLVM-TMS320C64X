@@ -28,8 +28,12 @@ using namespace IfConv;
 STATISTIC(NumSimpl, "Number of conditions predicated");
 
 static cl::opt<bool>
-DumpCFG("pred-dot-cfg", cl::init(false), cl::Hidden,
+DumpCFG("ifconv-dot-cfg", cl::init(false), cl::Hidden,
   cl::desc("Dump annotated graph."));
+
+static cl::opt<bool>
+OptGlobal("ifconv-global", cl::init(false), cl::Hidden,
+  cl::desc("Use global model for if conversion."));
 
 namespace {
   struct PredicationPass : public FunctionPass {
@@ -52,6 +56,8 @@ namespace {
     std::set<BasicBlock*> BlocksToPredicate;
 
     virtual bool runOnFunction(Function &F);
+    void runIterative(Function &F);
+    void runGlobal(Function &F);
     bool convertPHICycle(BasicBlock *BB, PHINode *PN);
     bool convertPHIs(BasicBlock *BB, PHINode *PN);
     Value *combinePredicates(BasicBlock *BB, std::vector<IfInfo*> &ii);
@@ -719,12 +725,23 @@ bool PredicationPass::runOnFunction(Function &F) {
   if (DumpCFG)
     dumpGraph(F);
 
+  if (OptGlobal)
+    runGlobal(F);
+  else
+    runIterative(F);
+
+  return true;
+}
+
+void PredicationPass::runIterative(Function &F) {
   bool Changed;
   do {
     Changed = predicate(F);
     Changed |= simplify(F);
   } while (Changed);
+}
 
+void PredicationPass::runGlobal(Function &F) {
 #if 1
   Oracle orcl;
   IntervalPartition &IP = getAnalysis<IntervalPartition>();
@@ -764,8 +781,6 @@ bool PredicationPass::runOnFunction(Function &F) {
     BlocksToPredicate.insert(BB);
   }
 #endif
-
-  return true;
 }
 
 #if 0
