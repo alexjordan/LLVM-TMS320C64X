@@ -80,7 +80,7 @@ namespace CFGPartition {
 
   public:
     Problem();
-    void computeSolution(std::set<llvm::BasicBlock*> &result);
+    void computeSolution(std::list<IfConv::CFGPartition_t> &result);
 
     // original CFG
     graph_t graph;
@@ -135,7 +135,7 @@ GlobalIfConv::~GlobalIfConv() {
   delete cfgp;
 }
 
-void GlobalIfConv::solve(std::set<BasicBlock*> &result) {
+void GlobalIfConv::solve(std::list<IfConv::CFGPartition_t> &result) {
   cfgp->computeSolution(result);
 }
 
@@ -146,23 +146,24 @@ CFGPartition::Problem::Problem()
 {
 }
 
-void CFGPartition::Problem::computeSolution(std::set<BasicBlock*> &result) {
+void CFGPartition::Problem::computeSolution(std::list<CFGPartition_t> &result) {
   Solution root(graph);
   Incumbent = std::make_pair(root, INT_MAX);
   reduce(root);
 
   graph_t &g_solution = Incumbent.first.graph;
   BOOST_FOREACH(const node_t &n, vertices(g_solution)) {
-    if (g_solution[n].BBs.size() > 1)
-      result.insert(g_solution[n].BBs.begin(), g_solution[n].BBs.end());
+    if (g_solution[n].BBs.size() > 1) {
+      result.push_back(g_solution[n].BBs);
+    }
   }
 }
 
 void CFGPartition::Problem::check(const Solution &s) {
-  dbgs() << "Solution X:\ngraph vertices: " << num_vertices(s.graph)
-      << " edges: " << num_edges(s.graph) << "\n";
+  DEBUG(dbgs() << "Solution X:\ngraph vertices: " << num_vertices(s.graph)
+      << " edges: " << num_edges(s.graph) << "\n");
   int cost = s.sumCost();
-  dbgs() << "cost: " << cost << "\n";
+  DEBUG(dbgs() << "cost: " << cost << "\n");
   if (cost < Incumbent.second) {
     Incumbent = std::make_pair(s, cost);
     DEBUG(dbgs() << "new incumbent\n");
@@ -171,6 +172,8 @@ void CFGPartition::Problem::check(const Solution &s) {
     DEBUG(dbgs() << "solution reached LB\n");
     Solved = true;
   }
+
+
 }
 
 void CFGPartition::Problem::reduce(const Solution &s) {
@@ -186,8 +189,8 @@ void CFGPartition::Problem::reduce(const Solution &s) {
         && out_degree(v, s.graph) == 1) {
       edge_t e = *in_edges(v, s.graph).first;
       node_t u = source(e, s.graph);
-      dbgs() << "reduction: " << s.graph[v].name << " -> " << s.graph[u].name
-        << "\n";
+      DEBUG(dbgs() << "reduction: " << s.graph[v].name << " -> "
+        << s.graph[u].name << "\n");
       // collapse nodes in a new solution
       Solution rs(s.graph);
       rs.graph[u].BBs.insert(rs.graph[v].BBs.begin(), rs.graph[v].BBs.end());

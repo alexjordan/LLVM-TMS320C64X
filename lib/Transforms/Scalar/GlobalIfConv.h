@@ -2,10 +2,12 @@
 #define SCALAR_GLOBALIFCONV_H
 
 #include "llvm/Analysis/Interval.h"
+#include <list>
 #include <set>
 
 namespace IfConv {
   class Oracle;
+  typedef std::set<llvm::BasicBlock*> CFGPartition_t;
 }
 
 namespace CFGPartition {
@@ -17,7 +19,7 @@ class GlobalIfConv {
 public:
   GlobalIfConv(llvm::Interval *Int, const IfConv::Oracle &o);
   ~GlobalIfConv();
-  void solve(std::set<llvm::BasicBlock*> &result);
+  void solve(std::list<IfConv::CFGPartition_t> &result);
 
 };
 

@@ -56,7 +56,7 @@ namespace {
     bool convertPHIs(BasicBlock *BB, PHINode *PN);
     Value *combinePredicates(BasicBlock *BB, std::vector<IfInfo*> &ii);
     bool predicate(Function &F);
-    bool predicateTopDown(Function &F);
+    bool predicateTopDown(Interval *Int);
     bool simplify(Function &F);
     bool dumpGraph(Function &F);
   };
@@ -221,10 +221,10 @@ Value *PredicationPass::combinePredicates(BasicBlock *BB,
     std::vector<IfInfo*> &IfInfos) {
   DominatorTree &DT = getAnalysis<DominatorTree>();
   Value *Chain = NULL;
+  Instruction *insertIt = BB->getFirstNonPHI();
   for (std::vector<IfInfo*>::iterator I = IfInfos.begin(),
       E = IfInfos.end(); I != E; ++I) {
     IfInfo *ii = *I;
-    Instruction *insertIt = BB->getFirstNonPHI();
     Value *pred;
     if (DT.dominates(ii->IfFalse, BB))
       pred = BinaryOperator::CreateNot(ii->Condition, "p", insertIt);
@@ -337,9 +337,6 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
 }
 
 bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
-  BasicBlock *IfTrue, *IfFalse;
-  Function &F = *BB->getParent();
-
   assert(std::distance(pred_begin(BB), pred_end(BB)) == 2 &&
          "Function can only handle blocks with 2 predecessors!");
 
@@ -463,7 +460,8 @@ static void redirectBranch(BasicBlock *BB, BasicBlock *Old, BasicBlock *New) {
   }
 }
 
-bool PredicationPass::predicateTopDown(Function &F) {
+bool PredicationPass::predicateTopDown(Interval *Int) {
+  Function &F = *Int->getHeaderNode()->getParent();
   DominatorTree &DT = getAnalysis<DominatorTree>();
 
   // BFS
@@ -473,7 +471,7 @@ bool PredicationPass::predicateTopDown(Function &F) {
   std::map<BasicBlock*, IfInfo*> Block2If;
 
   BasicBlock *DomParent = NULL;
-  BasicBlock *BB = &*F.begin();
+  BasicBlock *BB = Int->getHeaderNode();
   Worklist.push_back(BB);
 
   while (Worklist.size()) {
@@ -481,7 +479,6 @@ bool PredicationPass::predicateTopDown(Function &F) {
     if (Seen.count(BB))
       continue;
 
-    DEBUG(dbgs() << "top-down processing: " << BB->getName() << "\n");
     if (BlocksToPredicate.count(BB)) {
       DomParent = BB;
       break;
@@ -491,7 +488,8 @@ bool PredicationPass::predicateTopDown(Function &F) {
     TerminatorInst *TI = BB->getTerminator();
     assert(TI);
     for (unsigned i = 0; i < TI->getNumSuccessors(); ++i)
-      Worklist.push_back(TI->getSuccessor(i));
+      if (Int->contains(TI->getSuccessor(i)))
+        Worklist.push_back(TI->getSuccessor(i));
     Seen.insert(BB);
   }
 
@@ -508,15 +506,25 @@ topo_tryagain:
     BB = Worklist.front(); Worklist.pop_front();
     if (Seen.count(BB))
       continue;
-    for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
-      BasicBlock *PredBB = *PI;
-      if (!Seen.count(PredBB)) {
-        // unseen predecessor -> not in topological order
-        Worklist.push_back(BB);
-        goto topo_tryagain;
+    if (!Int->contains(BB)) {
+      Seen.insert(BB);
+      continue;
+    }
+    if (BB != DomParent) {
+      for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
+        BasicBlock *PredBB = *PI;
+        if (Int->contains(PredBB) && DT.dominates(DomParent, PredBB)
+            && !Seen.count(PredBB)) {
+          // unseen predecessor -> not in topological order
+          Worklist.push_back(BB);
+          dbgs() << "unseen " << PredBB->getName() << "\n";
+          dbgs() << "try again w/ " << BB->getName() << "\n";
+          goto topo_tryagain;
+        }
       }
     }
     Seen.insert(BB);
+    DEBUG(dbgs() << "topo-order processing: " << BB->getName() << "\n");
 
     // don't touch these blocks other than fixing PHIs
     if (!BlocksToPredicate.count(BB)) {
@@ -566,8 +574,10 @@ topo_tryagain:
           IfInfo *ii = Block2If[CommonDom];
           if (!DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)))
             std::swap(i, j); // it's the other way around
-          assert(DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
-          assert(DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
+          assert(ii->IfTrue == BB ||
+              DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
+          assert(ii->IfFalse == BB ||
+              DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
 
           Value *TrueVal = PN->getIncomingValue(i);
           Value *FalseVal = PN->getIncomingValue(j);
@@ -587,85 +597,100 @@ topo_tryagain:
           //NV->takeName(PN);
         }
       }
-      continue;
-    }
+    } else {
+      // handle join inside the merge region
+      for (BasicBlock::iterator I = BB->begin();
+          PHINode *PN = dyn_cast<PHINode>(I);) {
+        I++;
+        std::set<BasicBlock*> Incoming;
+        std::vector<int> ValueNums;
+        for (int i = 0, e = PN->getNumIncomingValues(); i < e; ++i) {
+          BasicBlock *IB = PN->getIncomingBlock(i);
+          if (BlocksToPredicate.count(IB)) {
+            Incoming.insert(IB);
+            ValueNums.push_back(i);
+          }
+        }
+        if (Incoming.size() == 0)
+          continue; // unrelated phi
+        else if (Incoming.size() == 1) {
+          continue;
+        }
 
-    // handle join inside the merge region
-    while (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
-      DEBUG(dbgs() << "rewriting phi: " << *PN << "\n");
-      std::set<BasicBlock*> Incoming;
-      std::vector<int> ValueNums;
-      for (int i = 0, e = PN->getNumIncomingValues(); i < e; ++i) {
-        Incoming.insert(PN->getIncomingBlock(i));
-        ValueNums.push_back(i);
+        DEBUG(dbgs() << "rewriting phi: " << *PN << "\n");
+        assert(Incoming.size() == 2); // simple if-join
+
+        int i = ValueNums[0]; // assume: i == true-branch
+        int j = ValueNums[1]; // j == false-branch
+
+        // find dominating block (XXX recalculate DT??)
+        BasicBlock *CommonDom = DT.findNearestCommonDominator(
+            PN->getIncomingBlock(i), PN->getIncomingBlock(j));
+        assert(CommonDom);
+        assert(Block2If.count(CommonDom)); // Ifinfo must exist
+        IfInfo *ii = Block2If[CommonDom];
+        if (!DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)))
+          std::swap(i, j); // it's the other way around
+        assert(ii->IfTrue == BB || DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
+        assert(ii->IfFalse == BB || DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
+
+        Value *TrueVal = PN->getIncomingValue(i);
+        Value *FalseVal = PN->getIncomingValue(j);
+
+        // fast-forward over PHI nodes
+        BasicBlock::iterator AfterPHIIt = BB->begin();
+        while (isa<PHINode>(AfterPHIIt))
+          AfterPHIIt++;
+
+        Module *M = F.getParent();
+        const Type *Ty = TrueVal->getType();
+        Function *IfConvF = Intrinsic::getDeclaration(M,
+            Intrinsic::vliw_ifconv_t, &Ty, 1);
+        if (!ii->Condition->getType()->isIntegerTy(1)) {
+          ii->Condition->dump();
+          assert(false);
+        }
+        Value *Ops[] = { ii->Condition, TrueVal, FalseVal };
+        Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi", AfterPHIIt);
+
+        NV->takeName(PN);
+        PN->replaceAllUsesWith(NV);
+
+        BB->getInstList().erase(PN);
+
+        DEBUG(dbgs() << "to psi: " << *NV << "\n");
       }
-      assert(Incoming.size() == 2); // simple if-join
 
-      int i = ValueNums[0]; // assume: i == true-branch
-      int j = ValueNums[1]; // j == false-branch
+      // stop at a return block
+      if (isa<ReturnInst>(BB->getTerminator()))
+        continue;
 
-      // find dominating block (XXX recalculate DT??)
-      BasicBlock *CommonDom = DT.findNearestCommonDominator(
-          PN->getIncomingBlock(i), PN->getIncomingBlock(j));
-      assert(CommonDom);
-      assert(Block2If.count(CommonDom)); // Ifinfo must exist
-      IfInfo *ii = Block2If[CommonDom];
-      if (!DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)))
-        std::swap(i, j); // it's the other way around
-      assert(ii->IfTrue == BB || DT.dominates(ii->IfTrue, PN->getIncomingBlock(i)));
-      assert(ii->IfFalse == BB || DT.dominates(ii->IfFalse, PN->getIncomingBlock(j)));
+      // hoist code (if-conversion)
+      if (BB != DomParent) {
+        DEBUG(dbgs() << "Hoisting: " << BB->getName() << "\n");
+        Oracle oracle;
+        BlockInfo BBInfo;
+        oracle.analyze(BB, BBInfo);
+        assert(BBInfo.Convertible);
 
-      Value *TrueVal = PN->getIncomingValue(i);
-      Value *FalseVal = PN->getIncomingValue(j);
+        if (BBInfo.SideEffectInsts.size()) {
+          Value *P = combinePredicates(BB, IfInfos);
 
-      // fast-forward over PHI nodes
-      BasicBlock::iterator AfterPHIIt = BB->begin();
-      while (isa<PHINode>(AfterPHIIt))
-        AfterPHIIt++;
+          predicateInsts(BBInfo.SideEffectInsts.begin(),
+              BBInfo.SideEffectInsts.end(), P, true);
+        }
 
-      Module *M = F.getParent();
-      const Type *Ty = TrueVal->getType();
-      Function *IfConvF = Intrinsic::getDeclaration(M,
-          Intrinsic::vliw_ifconv_t, &Ty, 1);
-      if (!ii->Condition->getType()->isIntegerTy(1)) {
-        ii->Condition->dump();
-        assert(false);
+        DomParent->getInstList().splice(DomParent->getTerminator(),
+            BB->getInstList(),
+            BB->begin(),
+            BB->getTerminator());
       }
-      Value *Ops[] = { ii->Condition, TrueVal, FalseVal };
-      Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi", AfterPHIIt);
-
-      NV->takeName(PN);
-      PN->replaceAllUsesWith(NV);
-
-      BB->getInstList().erase(PN);
-
-      DEBUG(dbgs() << "to psi: " << *NV << "\n");
     }
 
     // stop at a return block
     if (isa<ReturnInst>(BB->getTerminator()))
       continue;
 
-    // hoist code (if-conversion)
-    if (BB != DomParent) {
-      DEBUG(dbgs() << "Hoisting: " << BB->getName() << "\n");
-      Oracle oracle;
-      BlockInfo BBInfo;
-      oracle.analyze(BB, BBInfo);
-      assert(BBInfo.Convertible);
-
-      if (BBInfo.SideEffectInsts.size()) {
-        Value *P = combinePredicates(BB, IfInfos);
-
-        predicateInsts(BBInfo.SideEffectInsts.begin(),
-            BBInfo.SideEffectInsts.end(), P, true);
-      }
-
-      DomParent->getInstList().splice(DomParent->getTerminator(),
-          BB->getInstList(),
-          BB->begin(),
-          BB->getTerminator());
-    }
     BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
     assert(BI);
     if (BI->isConditional()) {
@@ -714,17 +739,23 @@ bool PredicationPass::runOnFunction(Function &F) {
     }
     DEBUG(dbgs() << "Interval (" << Int->getHeaderNode()->getName() << ") has "
         << Int->Nodes.size() << " blocks\n");
+    Int->print(dbgs());
     GlobalIfConv gif(Int, orcl);
-    BlocksToPredicate.clear();
-    gif.solve(BlocksToPredicate);
+    std::list<CFGPartition_t> result;
+    gif.solve(result);
 
-    DEBUG(dbgs() << "BLOCKS FOR IF-CONVERSION:\n");
-    for (std::set<BasicBlock*>::iterator I = BlocksToPredicate.begin(),
-        E = BlocksToPredicate.end(); I != E; ++I)
-      DEBUG(dbgs() << (*I)->getNameStr() << "\n");
-    DEBUG(dbgs() << "END IF-CONVERSION BLOCKS\n");
+    for (std::list<CFGPartition_t>::iterator RI = result.begin(),
+         RE = result.end(); RI != RE; ++RI) {
+      BlocksToPredicate = *RI;
 
-    //predicateTopDown(F);
+      DEBUG(dbgs() << "BLOCKS FOR IF-CONVERSION:\n");
+      for (std::set<BasicBlock*>::iterator I = BlocksToPredicate.begin(),
+          E = BlocksToPredicate.end(); I != E; ++I)
+        DEBUG(dbgs() << (*I)->getNameStr() << "\n");
+      DEBUG(dbgs() << "END IF-CONVERSION BLOCKS\n");
+
+      predicateTopDown(Int);
+    }
   }
 #else
   // predicate everything
