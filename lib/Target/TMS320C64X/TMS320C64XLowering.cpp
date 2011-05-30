@@ -286,7 +286,10 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
 
   setStackPointerRegisterToSaveRestore(TMS320C64X::A15);
   computeRegisterProperties();
-  return;
+
+  // We want BURR for prepass scheduling as we sometimes break the DAG with
+  // cycles and TD doesn't assert on that.
+  setSchedulingPreference(SchedulingForRegPressure);
 }
 
 //-----------------------------------------------------------------------------
