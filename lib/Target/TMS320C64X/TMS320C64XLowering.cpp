@@ -239,7 +239,6 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
 
   // Manually beat condition code setting into cmps
-  setOperationAction(ISD::SETCC, MVT::i1, Custom);
   setOperationAction(ISD::SETCC, MVT::i32, Custom);
 
   // We can emulate br_cc, maybe not brcond, do what works
@@ -1064,7 +1063,7 @@ void TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
   // Catch all intrinsics here that we want to custom lower, but not any other
   // nodes that LLVM promotes/expands/etc.
   switch (N->getOpcode()) {
-    default: return;
+    default: llvm_unreachable("only for intrinsics!"); return;
 
     case ISD::INTRINSIC_WO_CHAIN:
     case ISD::INTRINSIC_VOID:
@@ -1076,6 +1075,8 @@ void TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
     Results.push_back(Res);
 }
 
+// XXX: this is a hack, remove when intrinsic lowering is fixed.
+// we would actually expect all bools to be promoted to i32 after legalization
 SDValue TMS320C64XLowering::PromoteBoolean(SDValue op, SelectionDAG &DAG) {
   if (op->getValueType(0) != MVT::i1)
     return op;
@@ -1084,6 +1085,12 @@ SDValue TMS320C64XLowering::PromoteBoolean(SDValue op, SelectionDAG &DAG) {
   if (Const)
     return DAG.getTargetConstant(Const->getSExtValue() ? 1 : 0, MVT::i32);
 
-  assert(false && "promote non-const");
+  if (op->getOpcode() == ISD::TRUNCATE) {
+    SDValue TruncParent = op->getOperand(0);
+    assert(TruncParent.getValueType() == MVT::i32);
+    return TruncParent;
+  }
+
+  assert(false && "unknown promotion");
   return op;
 }
