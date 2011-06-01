@@ -93,7 +93,7 @@ using namespace boost;
 using namespace CFGPartition;
 using namespace IfConv;
 
-GlobalIfConv::GlobalIfConv(Interval *Int, const IfConv::Oracle &orcl)
+GlobalIfConv::GlobalIfConv(Interval *Int, IfConv::Oracle &orcl)
   : cfgp(new CFGPartition::Problem) {
   std::map<const BasicBlock*, node_t> BlockMap;
 

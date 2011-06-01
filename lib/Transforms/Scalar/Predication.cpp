@@ -9,6 +9,7 @@
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/IntervalPartition.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ProfileInfo.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -24,6 +25,10 @@
 #include <list>
 using namespace llvm;
 using namespace IfConv;
+
+// format double precision CFG weights for raw_ostream
+#define WFMT(w) \
+  (llvm::format("%2.5f", w))
 
 STATISTIC(NumSimpl, "Number of conditions predicated");
 
@@ -44,7 +49,9 @@ namespace {
       AU.addRequired<DominatorTree>();
       AU.addRequired<IntervalPartition>();
       AU.addRequiredTransitive<LoopInfo>();
+      AU.addRequired<ProfileInfo>();
       AU.addPreserved<LoopInfo>();
+      AU.addPreserved<IntervalPartition>();
     }
 
     struct IfInfo {
@@ -54,6 +61,7 @@ namespace {
     };
 
     std::set<BasicBlock*> BlocksToPredicate;
+    ProfileInfo *PI;
 
     virtual bool runOnFunction(Function &F);
     void runIterative(Function &F);
@@ -277,15 +285,11 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
   BlockInfo DomBlockInfo, BBInfo[2];
   bool TruePred[2];
 
-  Oracle oracle;
-  oracle.analyze(DomBlock, DomBlockInfo);
+  Oracle oracle(PI);
+  if (!oracle.shouldConvert(DomBlock, IfBlock1, IfBlock2))
+    return false;
 
   if (IfBlock1) {
-    oracle.analyze(IfBlock1, BBInfo[0]);
-    DEBUG(BBInfo[0].dump());
-    if (!oracle.shouldConvert(DomBlockInfo, BBInfo[0]))
-      return false;
-
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
         IfBlock1->getInstList(),
         IfBlock1->begin(),
@@ -294,11 +298,6 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
     TruePred[0] = IfBlock1 == IfTrue;
   }
   if (IfBlock2) {
-    oracle.analyze(IfBlock2, BBInfo[1]);
-    DEBUG(BBInfo[1].dump());
-    if (!oracle.shouldConvert(DomBlockInfo, BBInfo[1]))
-      return false;
-
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
         IfBlock2->getInstList(),
         IfBlock2->begin(),
@@ -375,11 +374,30 @@ bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
   BasicBlock *Pred = *PI;
 
   BlockInfo HostInfo, PredInfo;
-  Oracle oracle;
+  Oracle oracle(this->PI); // oh no, ugly overload
   oracle.analyze(BB, HostInfo);
   oracle.analyze(Pred, PredInfo);
-  if (!oracle.shouldConvert(HostInfo, PredInfo))
+  double e1 = oracle.getBBCount(BB);
+  double e2 = oracle.getBBCount(Pred);
+  DEBUG(dbgs() << "ORIG HCOST (" << HostInfo.NumInstructions << "): "
+      << WFMT(e1) << "\n");
+  DEBUG(dbgs() << "ORIG PCOST (" << PredInfo.NumInstructions << "): "
+      << WFMT(e2) << "\n");
+  double ocost = HostInfo.NumInstructions * e1 +
+    (PredInfo.NumInstructions + Oracle::BRANCH_COST) * e2;
+
+  // check for hazards in the block that we need to convert to close the cycle
+  if (!PredInfo.Convertible)
     return false;
+
+  double ccost = std::max(PredInfo.NumInstructions, HostInfo.NumInstructions) * e1;
+
+  DEBUG(dbgs() << "IFCONV COST: " << WFMT(ccost) << "\n");
+  DEBUG(dbgs() << "ORIG COST: " << WFMT(ocost) << "\n");
+
+  if (ccost >= ocost)
+    return false;
+
 
   BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
   assert(BI->isConditional());
@@ -674,7 +692,7 @@ topo_tryagain:
       // hoist code (if-conversion)
       if (BB != DomParent) {
         DEBUG(dbgs() << "Hoisting: " << BB->getName() << "\n");
-        Oracle oracle;
+        Oracle oracle(PI);
         BlockInfo BBInfo;
         oracle.analyze(BB, BBInfo);
         assert(BBInfo.Convertible);
@@ -725,6 +743,15 @@ bool PredicationPass::runOnFunction(Function &F) {
   if (DumpCFG)
     dumpGraph(F);
 
+  PI = &getAnalysis<ProfileInfo>();
+  assert(PI);
+  if (PI->getExecutionCount(&F.getEntryBlock()) < .0) {
+    DEBUG(dbgs() << "no profile info loaded\n");
+    PI = NULL;
+  } else {
+    DEBUG(PI->dump(&F));
+  }
+
   if (OptGlobal)
     runGlobal(F);
   else
@@ -743,7 +770,7 @@ void PredicationPass::runIterative(Function &F) {
 
 void PredicationPass::runGlobal(Function &F) {
 #if 1
-  Oracle orcl;
+  Oracle orcl(PI);
   IntervalPartition &IP = getAnalysis<IntervalPartition>();
   const std::vector<Interval*> &intervals = IP.getIntervals();
   for (std::vector<Interval*>::const_iterator I = intervals.begin(),
@@ -807,7 +834,7 @@ void PredicationPass::runGlobal(Function &F) {
 #endif
 
 bool
-IfConv::Oracle::shouldConvert(const BlockInfo &host, const BlockInfo &block) const {
+IfConv::Oracle::shouldConvert(const BlockInfo &host, const BlockInfo &block) {
   // simple and state-less: do not convert any blocks larger than 10 insts.
   if (!block.Convertible)
     return false;
@@ -820,7 +847,86 @@ IfConv::Oracle::shouldConvert(const BlockInfo &host, const BlockInfo &block) con
 }
 
 int
-IfConv::Oracle::getEdgeCost(llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) const {
+IfConv::Oracle::getLegCost(BasicBlock *Parent, BasicBlock *BB) {
+  int cost = BRANCH_COST;
+  if (BB) {
+    BlockInfo info;
+    analyze(BB, info);
+    cost += info.NumInstructions;
+    cost += BRANCH_COST;
+  }
+  return cost;
+}
+
+int
+IfConv::Oracle::getConversionCost(BasicBlock *BB1, BasicBlock *BB2) {
+  BlockInfo info1, info2;
+  if (BB1) analyze(BB1, info1);
+  if (BB2) analyze(BB2, info2);
+  if (!info1.Convertible || !info2.Convertible)
+    return -1;
+  return std::max(info1.NumInstructions, info2. NumInstructions);
+}
+
+double IfConv::Oracle::getEdgeWeight(BasicBlock *Src, BasicBlock *Dst) {
+  if (PI)
+    return PI->getEdgeWeight(PI->getEdge(Src, Dst));
+
+  // local estimate
+  BranchInst *BI = dyn_cast<BranchInst>(Src->getTerminator());
+  assert(BI);
+  if (BI->isUnconditional()) {
+    assert(BI->getNumSuccessors() == 1);
+    return 1.;
+  } else {
+    assert(BI->getNumSuccessors() == 2);
+    return .5;
+  }
+}
+
+double IfConv::Oracle::getBBCount(BasicBlock *BB) {
+  if (PI)
+    return PI->getExecutionCount(BB);
+  return 1.;
+}
+
+bool
+IfConv::Oracle::shouldConvert(BasicBlock *Parent, BasicBlock *BB1,
+    BasicBlock *BB2) {
+
+  // BB2 can be NULL (triangle IFs), but consolidate argument order
+  if (!BB1)
+    std::swap(BB1, BB2);
+  assert(BB1);
+
+  int cost1 = getLegCost(Parent, BB1);
+  int cost2 = getLegCost(Parent, BB2);
+  double w1 = getEdgeWeight(Parent, BB1);
+  double w2 = getEdgeWeight(Parent, BB2);
+  if (!BB2)
+    w2 = getBBCount(Parent) - w1;
+
+  DEBUG(dbgs() << "ORIG COST (" << (BB1?BB1->getName():"none") << "): " << cost1
+      << " [" << WFMT(w1) << "]\n");
+  DEBUG(dbgs() << "ORIG COST (" << (BB2?BB2->getName():"none") << "): " << cost2
+      << " [" << WFMT(w2) << "]\n");
+
+  double ocost = cost1 * w1 + cost2 * w2;
+
+  int cc = getConversionCost(BB1, BB2);
+  if (cc < 0)
+    return false;
+
+  double ccost = cc * (w1 + w2);
+
+  DEBUG(dbgs() << "IFCONV COST (" << cc << "): " << WFMT(ccost) << "\n");
+  DEBUG(dbgs() << "ORIG COST (" << "): " << WFMT(ocost) << "\n");
+
+  return ccost < ocost;
+}
+
+int
+IfConv::Oracle::getEdgeCost(llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) {
   BlockInfo srcInfo, dstInfo;
   analyze(srcBB, srcInfo);
   analyze(dstBB, dstInfo);
@@ -828,17 +934,19 @@ IfConv::Oracle::getEdgeCost(llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) co
   return 10;
 }
 
-void IfConv::Oracle::analyze(BasicBlock *BB, BlockInfo &info) const {
+void IfConv::Oracle::analyze(BasicBlock *BB, BlockInfo &info) {
   info.Name = BB->getNameStr();
   info.Convertible = true;
-  for (BasicBlock::iterator BBI = BB->begin(), BBE = BB->end(); BBI != BBE; ++BBI) {
+  for (BasicBlock::iterator BBI = BB->begin(), BBE = BB->end();
+      BBI != BBE; ++BBI) {
     Instruction *I = BBI;
-
-    if (I->isTerminator() || I->getOpcode() == Instruction::PHI)
-      break; // ok for us, branch semantics checked elsewhere
 
     // count as instruction
     ++info.NumInstructions;
+
+    if (I->isTerminator() || I->getOpcode() == Instruction::PHI)
+      continue; // ok for us, branch semantics checked elsewhere
+
 
     if (I->isSafeToSpeculativelyExecute())
       continue;

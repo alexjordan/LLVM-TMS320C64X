@@ -17,7 +17,7 @@ namespace CFGPartition {
 class GlobalIfConv {
   CFGPartition::Problem *cfgp;
 public:
-  GlobalIfConv(llvm::Interval *Int, const IfConv::Oracle &o);
+  GlobalIfConv(llvm::Interval *Int, IfConv::Oracle &o);
   ~GlobalIfConv();
   void solve(std::list<IfConv::CFGPartition_t> &result);
 
