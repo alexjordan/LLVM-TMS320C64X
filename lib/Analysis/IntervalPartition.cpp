@@ -12,7 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "intervals"
 #include "llvm/Analysis/IntervalIterator.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
 char IntervalPartition::ID = 0;
@@ -82,6 +85,7 @@ bool IntervalPartition::runOnFunction(Function &F) {
   // predecessors for each block.
   for (unsigned i = 0, e = Intervals.size(); i != e; ++i)
     updatePredecessors(Intervals[i]);
+  DEBUG(print(dbgs()));
   return false;
 }
 
