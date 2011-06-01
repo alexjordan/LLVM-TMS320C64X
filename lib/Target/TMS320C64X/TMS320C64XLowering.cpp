@@ -1053,6 +1053,9 @@ TMS320C64XLowering::LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const
   unsigned IntNo = cast<ConstantSDNode>(op.getOperand(1))->getZExtValue();
   assert (IntNo == Intrinsic::vliw_predicate_mem);
 
+  MemSDNode *M = dyn_cast<MemSDNode>(op.getOperand(0));
+  assert(M);
+
 	SDValue ops[3];
 	ops[0] = op.getOperand(0); // chain
 	ops[1] = PromoteBoolean(op.getOperand(2), DAG); // predicate true/false bit
