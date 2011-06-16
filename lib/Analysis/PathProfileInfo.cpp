@@ -188,8 +188,14 @@ ProfilePathBlockVector* ProfilePath::getPathBlocks() const {
       pbv->push_back (currentNode->getBlock());
     // make the back edge the last edge since we are at the end
     else if( next->getTarget() == _ppi->_currentDag->getExit() ) {
-      pbv->push_back (currentNode->getBlock());
-      pbv->push_back (next->getRealEdge()->getTarget()->getBlock());
+      // NKIM, crashes happen here for sick CFGs, therefore for the time
+      // being, we check explicitly. TODO, resolve properly later !
+      if (next && next->getRealEdge()) {
+        pbv->push_back (currentNode->getBlock());
+        pbv->push_back (next->getRealEdge()->getTarget()->getBlock());
+      }
+      else errs() << "ProfilePath::getPathBlocks(): "
+                     "bad real-edge detected!\n";
     }
 
     // set the new node
