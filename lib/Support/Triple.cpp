@@ -42,6 +42,9 @@ const char *Triple::getArchTypeName(ArchType Kind) {
   case xcore:   return "xcore";
   case mblaze:  return "mblaze";
   case ptx:     return "ptx";
+
+// NKIM, added a triple for the TI64 target
+  case tms320c64x: return "tms320c64x";
   }
 
   return "<invalid>";
@@ -75,6 +78,9 @@ const char *Triple::getArchTypePrefix(ArchType Kind) {
   case xcore:   return "xcore";
 
   case ptx:     return "ptx";
+
+// NKIM, added a prefix for the TI64 target
+  case tms320c64x: return "ti64x";
   }
 }
 
@@ -164,6 +170,10 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     return xcore;
   if (Name == "ptx")
     return ptx;
+
+// NKIM, added for the TI64 target
+  if (Name == "tms320c64x")
+    return tms320c64x;
 
   return UnknownArch;
 }
@@ -287,6 +297,11 @@ Triple::ArchType Triple::ParseArch(StringRef ArchName) {
     return xcore;
   else if (ArchName == "ptx")
     return ptx;
+
+// NKIM, added for the TI64 target
+  else if (ArchName == "tms320c64x")
+    return tms320c64x;
+
   else
     return UnknownArch;
 }

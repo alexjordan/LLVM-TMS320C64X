@@ -66,6 +66,8 @@ public:
     mblaze,  // MBlaze: mblaze
     ptx,     // PTX: ptx
 
+// NKIM, added an enum for the TI-family
+    tms320c64x, // TI64-family
     InvalidArch
   };
   enum VendorType {
