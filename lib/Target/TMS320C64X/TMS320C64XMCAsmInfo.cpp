@@ -34,9 +34,13 @@ TMS320C64XMCAsmInfo::TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT) {
   Data32bitsDirective = "\t.word\t";
   Data64bitsDirective = "\t.dword\t";
   ZeroDirective = "\t.zero\t";
-  CommentString = ";";
+  AsciiDirective = "\t.string\t";
+  AscizDirective = "\t.cstring\t";
 
-  AlignmentIsInBytes = false;
-  COMMDirectiveAlignmentIsInBytes = false;
-  HasLCOMMDirective = true;
+  CommentString = ";";
+  AllowPeriodsInName = false;
+
+	AlignmentIsInBytes = true;
+	COMMDirectiveAlignmentIsInBytes = true;
+	HasLCOMMDirective = false;
 }
