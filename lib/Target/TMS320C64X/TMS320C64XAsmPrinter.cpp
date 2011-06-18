@@ -209,6 +209,15 @@ void TMS320C64XAsmPrinter::emit_epilog(const MachineInstr *MI) {
 
 void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
 
+  SmallString<256> instString;
+  raw_svector_ostream OS(instString);
+
+  if (MI->getDesc().getOpcode() == TargetOpcode::INLINEASM) {
+    OS << MI->getOperand(0).getSymbolName() << "\n";
+    OutStreamer.EmitRawText(OS.str());
+    return;
+  }
+
   if (MI->getDesc().getOpcode() == TMS320C64X::BUNDLE_END) {
     BundleMode = true;
     BundleOpen = false;
@@ -220,9 +229,6 @@ void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
 #endif
     return;
   }
-
-  SmallString<256> instString;
-  raw_svector_ostream OS(instString);
 
   if (BundleMode) {
     const char *prefix = "\t";
