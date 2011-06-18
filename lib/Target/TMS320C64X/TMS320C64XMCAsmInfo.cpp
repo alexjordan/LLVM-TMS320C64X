@@ -36,6 +36,7 @@ TMS320C64XMCAsmInfo::TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT) {
   ZeroDirective = "\t.zero\t";
   AsciiDirective = "\t.string\t";
   AscizDirective = "\t.cstring\t";
+  WeakRefDirective = "\t.ref ";
 
   CommentString = ";";
   AllowPeriodsInName = false;

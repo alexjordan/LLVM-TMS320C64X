@@ -805,6 +805,15 @@ bool AsmPrinter::doFinalization(Module &M) {
       OutStreamer.EmitSymbolAttribute(Mang->getSymbol(I), MCSA_WeakReference);
     }
   }
+  
+  if (MAI->getWeakRefDirective()) {
+    for (Module::const_iterator I = M.begin(), E = M.end();
+         I != E; ++I) {
+      if (!I->hasExternalLinkage()) continue;
+      OutStreamer.EmitSymbolAttribute(Mang->getSymbol(I),
+                                      MCSA_WeakReference);
+    }
+  }
 
   if (MAI->hasSetDirective()) {
     OutStreamer.AddBlankLine();
