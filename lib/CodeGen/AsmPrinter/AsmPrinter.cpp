@@ -806,6 +806,8 @@ bool AsmPrinter::doFinalization(Module &M) {
     }
   }
   
+  // XXX this is a hack for TMS320C64X where we need to .ref all externals.
+  // Should not be here, but in the target.
   if (MAI->getWeakRefDirective()) {
     for (Module::const_iterator I = M.begin(), E = M.end();
          I != E; ++I) {
