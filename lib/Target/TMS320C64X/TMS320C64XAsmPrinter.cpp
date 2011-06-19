@@ -38,6 +38,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -47,6 +48,7 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace llvm;
 
@@ -67,6 +69,8 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
     }
 
     const char *getRegisterName(unsigned RegNo);
+
+    void handleSoftFloatCall(const char* SymbolName);
 
     bool print_predicate(const MachineInstr *MI,
                          raw_ostream &OS,
@@ -158,6 +162,26 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   }
 
   return false;
+}
+
+//-----------------------------------------------------------------------------
+
+void TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
+  static const char *FPNames[] = { 
+    "__addf", "__subf", "__mpyf", "__divf",
+    "__addd", "__subd", "__mpyd", "__divd",
+    "__cmpf", "__cvtdf", "__cvtfd",
+    "__fixdi", "__fixdu", "__fixfi", "__fixfu",
+    "__fltid", "__fltif" };
+
+  for (unsigned i = 0; i < array_lengthof(FPNames); ++i) {
+    if (strcmp(SymbolName, FPNames[i]) == 0) {
+      Module *M = const_cast<Module*>(MMI->getModule());
+      M->getOrInsertFunction(SymbolName + 1, // skip underscore at beginning
+                             Type::getVoidTy(M->getContext()), NULL);
+      break;
+    }
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -401,6 +425,7 @@ void TMS320C64XAsmPrinter::printOperand(const MachineInstr *MI,
       break;
 
     case MachineOperand::MO_ExternalSymbol:
+      handleSoftFloatCall(MO.getSymbolName());
       OS << MO.getSymbolName();
       break;
 
