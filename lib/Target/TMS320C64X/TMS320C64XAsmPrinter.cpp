@@ -38,6 +38,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -47,6 +48,7 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace llvm;
 
@@ -68,7 +70,11 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
 
     const char *getRegisterName(unsigned RegNo);
 
-    bool print_predicate(const MachineInstr *MI, const char *prefix = "\t");
+    void handleSoftFloatCall(const char* SymbolName);
+
+    bool print_predicate(const MachineInstr *MI,
+                         raw_ostream &OS,
+                         const char *prefix = "\t");
     void emit_prolog(const MachineInstr *MI);
     void emit_epilog(const MachineInstr *MI);
     void emit_inst(const MachineInstr *MI);
@@ -160,6 +166,26 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
 //-----------------------------------------------------------------------------
 
+void TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
+  static const char *FPNames[] = { 
+    "__addf", "__subf", "__mpyf", "__divf",
+    "__addd", "__subd", "__mpyd", "__divd",
+    "__cmpf", "__cvtdf", "__cvtfd",
+    "__fixdi", "__fixdu", "__fixfi", "__fixfu",
+    "__fltid", "__fltif" };
+
+  for (unsigned i = 0; i < array_lengthof(FPNames); ++i) {
+    if (strcmp(SymbolName, FPNames[i]) == 0) {
+      Module *M = const_cast<Module*>(MMI->getModule());
+      M->getOrInsertFunction(SymbolName + 1, // skip underscore at beginning
+                             Type::getVoidTy(M->getContext()), NULL);
+      break;
+    }
+  }
+}
+
+//-----------------------------------------------------------------------------
+
 void TMS320C64XAsmPrinter::emit_prolog(const MachineInstr *MI) {
 
   // See instr info td file for why we do this here
@@ -209,32 +235,38 @@ void TMS320C64XAsmPrinter::emit_epilog(const MachineInstr *MI) {
 
 void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
 
+  SmallString<256> instString;
+  raw_svector_ostream OS(instString);
+
+  if (MI->getDesc().getOpcode() == TargetOpcode::INLINEASM) {
+    OS << MI->getOperand(0).getSymbolName() << "\n";
+    OutStreamer.EmitRawText(OS.str());
+    return;
+  }
+
   if (MI->getDesc().getOpcode() == TMS320C64X::BUNDLE_END) {
     BundleMode = true;
     BundleOpen = false;
 
 #if PRINT_BUNDLE_COMMENTS
-    print_predicate(MI);
-    printInstruction(MI);
+    print_predicate(MI, OS);
+    printInstruction(MI, OS);
     OutStreamer.EmitRawText(StringRef("\n"));
 #endif
     return;
   }
-
-  SmallString<256> instString;
-  raw_svector_ostream OS(instString);
 
   if (BundleMode) {
     const char *prefix = "\t";
 
     if (BundleOpen) prefix = "\t||"; // continue bundle
 
-    print_predicate(MI, prefix);
+    print_predicate(MI, OS, prefix);
     printInstruction(MI, OS);
     BundleOpen = true;
   }
   else {
-    print_predicate(MI);
+    print_predicate(MI, OS);
     printInstruction(MI, OS);
   }
 
@@ -266,6 +298,7 @@ void TMS320C64XAsmPrinter::printFU(const MachineInstr *MI,
 //-----------------------------------------------------------------------------
 
 bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
+                                           raw_ostream &OS,
                                            const char *prefix)
 {
   const TargetRegisterInfo &RI = *TM.getRegisterInfo();
@@ -277,8 +310,7 @@ bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
 
   if (pred_idx == -1) {
     // No predicate here
-    OutStreamer.EmitRawText(StringRef(prefix));
-//    OS << prefix;
+    OS << prefix;
     return false;
   }
 
@@ -287,8 +319,7 @@ bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
 
   if (nz == -1) {
     // This isn't a predicate
-    OutStreamer.EmitRawText(StringRef(prefix));
-//    OS << prefix;
+    OS << prefix;
     return false;
   }
 
@@ -297,11 +328,7 @@ bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
   if (!TargetRegisterInfo::isPhysicalRegister(reg))
     llvm_unreachable("Nonphysical register used for predicate");
 
-  SmallString<128> predString;
-  raw_svector_ostream OS(predString);
-
   OS << prefix << "[" << c << RI.getName(reg) << "]";
-  OutStreamer.EmitRawText(OS.str());
 
   return true;
 }
@@ -339,7 +366,7 @@ void TMS320C64XAsmPrinter::EmitGlobalVariable(const GlobalVariable *GVar) {
       if (sz == 0) sz = 1;
 
       // XXX - .lcomm?
-      OS << NameStr << ',' << sz << '\n';
+      OS << "\t.bss\t" << NameStr << "," << sz;
       OutStreamer.EmitRawText(OS.str());
       return;
     }
@@ -398,6 +425,7 @@ void TMS320C64XAsmPrinter::printOperand(const MachineInstr *MI,
       break;
 
     case MachineOperand::MO_ExternalSymbol:
+      handleSoftFloatCall(MO.getSymbolName());
       OS << MO.getSymbolName();
       break;
 
@@ -464,9 +492,9 @@ void TMS320C64XAsmPrinter::printMemOperand(const MachineInstr *MI,
     }
   }
   else {
-    OS << "(";
+    OS << "[";
     printOperand(MI, op_num+1, OS);
-    OS << ")";
+    OS << "]";
   }
 
   return;

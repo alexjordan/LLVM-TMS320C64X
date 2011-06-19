@@ -30,13 +30,18 @@ using namespace llvm;
 TMS320C64XMCAsmInfo::TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT) {
 
   GlobalDirective = "\t.global\t";
-  Data16bitsDirective = "\t.hword\t";
+  Data16bitsDirective = "\t.half\t";
   Data32bitsDirective = "\t.word\t";
-  Data64bitsDirective = "\t.dword\t";
+	Data64bitsDirective = 0;
   ZeroDirective = "\t.zero\t";
-  CommentString = ";";
+  AsciiDirective = "\t.string\t";
+  AscizDirective = "\t.cstring\t";
+  WeakRefDirective = "\t.ref ";
 
-  AlignmentIsInBytes = false;
-  COMMDirectiveAlignmentIsInBytes = false;
-  HasLCOMMDirective = true;
+  CommentString = ";";
+  AllowPeriodsInName = false;
+
+	AlignmentIsInBytes = true;
+	COMMDirectiveAlignmentIsInBytes = true;
+	HasLCOMMDirective = false;
 }

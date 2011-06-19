@@ -27,12 +27,12 @@
 #ifndef LLVM_TARGET_TMS320C64X_ASMINFO_H
 #define LLVM_TARGET_TMS320C64X_ASMINFO_H
 
-#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCAsmInfoCOFF.h"
 
 namespace llvm {
 	class Target;
 	class StringRef;
-	struct TMS320C64XMCAsmInfo : public MCAsmInfo {
+	struct TMS320C64XMCAsmInfo : public MCAsmInfoCOFF {
 	explicit TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT);
 };
 } // namespace llvm
