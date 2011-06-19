@@ -68,7 +68,9 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
 
     const char *getRegisterName(unsigned RegNo);
 
-    bool print_predicate(const MachineInstr *MI, const char *prefix = "\t");
+    bool print_predicate(const MachineInstr *MI,
+                         raw_ostream &OS,
+                         const char *prefix = "\t");
     void emit_prolog(const MachineInstr *MI);
     void emit_epilog(const MachineInstr *MI);
     void emit_inst(const MachineInstr *MI);
@@ -223,8 +225,8 @@ void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
     BundleOpen = false;
 
 #if PRINT_BUNDLE_COMMENTS
-    print_predicate(MI);
-    printInstruction(MI);
+    print_predicate(MI, OS);
+    printInstruction(MI, OS);
     OutStreamer.EmitRawText(StringRef("\n"));
 #endif
     return;
@@ -235,12 +237,12 @@ void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
 
     if (BundleOpen) prefix = "\t||"; // continue bundle
 
-    print_predicate(MI, prefix);
+    print_predicate(MI, OS, prefix);
     printInstruction(MI, OS);
     BundleOpen = true;
   }
   else {
-    print_predicate(MI);
+    print_predicate(MI, OS);
     printInstruction(MI, OS);
   }
 
@@ -272,6 +274,7 @@ void TMS320C64XAsmPrinter::printFU(const MachineInstr *MI,
 //-----------------------------------------------------------------------------
 
 bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
+                                           raw_ostream &OS,
                                            const char *prefix)
 {
   const TargetRegisterInfo &RI = *TM.getRegisterInfo();
@@ -283,8 +286,7 @@ bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
 
   if (pred_idx == -1) {
     // No predicate here
-    OutStreamer.EmitRawText(StringRef(prefix));
-//    OS << prefix;
+    OS << prefix;
     return false;
   }
 
@@ -293,8 +295,7 @@ bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
 
   if (nz == -1) {
     // This isn't a predicate
-    OutStreamer.EmitRawText(StringRef(prefix));
-//    OS << prefix;
+    OS << prefix;
     return false;
   }
 
@@ -303,11 +304,7 @@ bool TMS320C64XAsmPrinter::print_predicate(const MachineInstr *MI,
   if (!TargetRegisterInfo::isPhysicalRegister(reg))
     llvm_unreachable("Nonphysical register used for predicate");
 
-  SmallString<128> predString;
-  raw_svector_ostream OS(predString);
-
   OS << prefix << "[" << c << RI.getName(reg) << "]";
-  OutStreamer.EmitRawText(OS.str());
 
   return true;
 }
