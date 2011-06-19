@@ -342,7 +342,7 @@ void TMS320C64XAsmPrinter::EmitGlobalVariable(const GlobalVariable *GVar) {
       if (sz == 0) sz = 1;
 
       // XXX - .lcomm?
-      OS << NameStr << ',' << sz << '\n';
+      OS << "\t.bss\t" << NameStr << "," << sz;
       OutStreamer.EmitRawText(OS.str());
       return;
     }
