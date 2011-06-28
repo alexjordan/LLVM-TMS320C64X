@@ -13,6 +13,7 @@
 
 #include "TMS320C64XFrameLowering.h"
 #include "TMS320C64XInstrInfo.h"
+#include "TMS320C64XTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -95,7 +96,7 @@ void TMS320C64XFrameLowering::emitPrologue(MachineFunction &MF) const {
   frame_size += 7;
   frame_size &= ~7;
 
-  const TargetInstrInfo &TII = *(MF.getTarget().getInstrInfo());
+  const TMS320C64XInstrInfo &TII = *TM.getInstrInfo();
 
   // Emit setup instructions - unfortunately because they have to be
   // done in parallel now, this can't currently be modeled through llvm,
@@ -120,7 +121,7 @@ void TMS320C64XFrameLowering::emitEpilogue(MachineFunction &MF,
   if (MBBI->getOpcode() != TMS320C64X::ret)
     llvm_unreachable("Can't insert epilogue before non-ret insn");
 
-  const TargetInstrInfo &TII = *(MF.getTarget().getInstrInfo());
+  const TMS320C64XInstrInfo &TII = *TM.getInstrInfo();
 
   // For current situation, epilog has to be hard coded to allow
   // parallel instructions to work, hence this unpleasant hack...
