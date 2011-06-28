@@ -199,7 +199,9 @@ let isTerminator = 1 in {
 def prolog : inst<(outs), (ins i32imm:$stacksz), "", [], 0, unit_s>;
 
 // Similar story for epilog
-def epilog : inst<(outs), (ins), "", [], 0, unit_s>;
+def epilog : inst<(outs), (ins), "", [], 0, unit_s> {
+  let Defs = [B3];
+}
 }
 
 // Multiplies - there are a million and one of them, so we'll just be using
