@@ -123,6 +123,51 @@ TMS320C64XInstrInfo::CreateTargetHazardRecognizer(const TargetMachine *TM,
 
 //-----------------------------------------------------------------------------
 
+void TMS320C64XInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator I,
+                                      DebugLoc DL,
+                                      unsigned DestReg,
+                                      unsigned SrcReg,
+                                      bool KillSrc) const
+{
+  const bool destGPR = TMS320C64X::GPRegsRegClass.contains(DestReg);
+  const bool srcGPR = TMS320C64X::GPRegsRegClass.contains(SrcReg);
+
+  if (destGPR && srcGPR) {
+    MachineInstrBuilder MIB =
+      BuildMI(MBB, I, DL, get(TMS320C64X::mv), DestReg);
+
+    MIB.addReg(SrcReg, getKillRegState(KillSrc));
+    addDefaultPred(MIB);
+    return;
+  }
+
+/*
+  const bool destAReg = TMS320C64X::ARegsRegClass.contains(DestReg);
+  const bool srcAReg = TMS320C64X::ARegsRegClass.contains(SrcReg);
+  const bool destBReg = TMS320C64X::BRegsRegClass.contains(DestReg);
+  const bool srcBReg = TMS320C64X::BRegsRegClass.contains(SrcReg);
+
+  // both regs belong to the A-reg-file, therefore we can simply copy
+  // the content of the source reg by moving it into the destination,
+  // the same principle applies to the B-register file
+  if ((destAReg && srcAReg) || (destBReg && srcBReg)) {
+    MachineInstrBuilder MIB =
+      BuildMI(MBB, I, DL, get(TMS320C64X::mv), DestReg);
+
+    MIB.addReg(SrcReg, getKillRegState(KillSrc));
+    addDefaultPred(MIB);
+    return;
+  }
+*/
+
+  // we do not deal with the constraints of the cross-path-copies,
+  // for now we simply let this up to the scheduler completely
+  llvm_unreachable("Can not copy physical registers!");
+}
+
+//-----------------------------------------------------------------------------
+
 bool
 TMS320C64XInstrInfo::copyRegToReg(MachineBasicBlock &MBB,
 				  MachineBasicBlock::iterator MI,

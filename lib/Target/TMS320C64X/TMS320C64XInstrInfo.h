@@ -109,6 +109,13 @@ public:
     CreateTargetHazardRecognizer(const TargetMachine *TM,
                                  const ScheduleDAG *DAG) const;
 
+    virtual void copyPhysReg(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator I,
+                             DebugLoc DL,
+                             unsigned DestReg,
+                             unsigned SrcReg,
+                             bool KillSrc) const;
+
     virtual bool copyRegToReg(MachineBasicBlock &MBB,
                               MachineBasicBlock::iterator I,
                               unsigned destReg,
