@@ -26,6 +26,7 @@
 
 #include "TMS320C64X.h"
 #include "TMS320C64XInstrInfo.h"
+#include "TMS320C64XSubtarget.h"
 #include "TMS320C64XGenInstrInfo.inc"
 
 #include "llvm/Function.h"
@@ -107,13 +108,17 @@ ScheduleHazardRecognizer *
 TMS320C64XInstrInfo::CreateTargetHazardRecognizer(const TargetMachine *TM,
                                                   const ScheduleDAG *DAG) const
 {
-  // Should use subtarget info to pick the right hazard recognizer.
-  // For now, we always return a TMS320C64X recognizer
-
   const TargetInstrInfo *TII = TM->getInstrInfo();
-
   assert(TII && "No InstrInfo? Can not create a hazard recognizer!");
-  return new TMS320C64XHazardRecognizer(*TII);
+
+  // Only use hazard recognizer with post-RA scheduling setup
+  if (TM->getSubtarget<TMS320C64XSubtarget>().enablePostRAScheduler()) {
+    assert(false && "not yet implemented/tested");
+    return new TMS320C64XHazardRecognizer(*TII);
+  }
+
+  // Otherwise use LLVM default
+  return TargetInstrInfoImpl::CreateTargetHazardRecognizer(TM, DAG);
 }
 
 //-----------------------------------------------------------------------------
