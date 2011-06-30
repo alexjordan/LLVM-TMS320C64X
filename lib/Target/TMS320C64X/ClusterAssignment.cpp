@@ -1,3 +1,18 @@
+//===-- TMS320C64X/ClusterAssignment.cpp ------------------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file was developed by Alexander Jordan, Vienna University of Technology,
+// and is distributed under the University of Illinois Open Source License.
+// See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// Implements BUG (bottom-up-greedy) alike cluster assignment for the 
+// TMS320C64X.
+//
+//===----------------------------------------------------------------------===//
+
 #include "ClusterAssignment.h"
 #include "DAGHelper.h"
 #include "TMS320C64XRegisterInfo.h"

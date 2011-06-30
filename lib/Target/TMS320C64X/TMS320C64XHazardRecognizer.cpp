@@ -1,10 +1,14 @@
-//===-- llvm/ ---------------------------------------------------*- C++ -*-===//
+//===-- TMS320C64XHazardRecognizer.cpp --------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
 // This file was developed by Alexander Jordan, Vienna University of Technology,
 // and is distributed under the University of Illinois Open Source License.
 // See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// Implements the hazard recognizer for the TMS320C64X.
 //
 //===----------------------------------------------------------------------===//
 

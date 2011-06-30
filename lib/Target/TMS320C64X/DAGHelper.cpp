@@ -1,3 +1,17 @@
+//===-- TMS320C64X/DAGHelper.cpp --------------------------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file was developed by Alexander Jordan, Vienna University of Technology,
+// and is distributed under the University of Illinois Open Source License.
+// See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// XXX this code should probably be moved to cluster assignment.
+//
+//===----------------------------------------------------------------------===//
+
 #define DEBUG_TYPE "clustering"
 
 #include "DAGHelper.h"

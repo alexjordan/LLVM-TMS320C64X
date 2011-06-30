@@ -1,3 +1,17 @@
+//===-- TMS320C64XScheduler.cpp ---------------------------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file was developed by Alexander Jordan, Vienna University of Technology,
+// and is distributed under the University of Illinois Open Source License.
+// See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// Bundling post-register-allocation scheduler for the TMS320C64X.
+//
+//===----------------------------------------------------------------------===//
+
 #ifdef POST_RA_SCHED
 #define DEBUG_TYPE "post-RA-sched"
 

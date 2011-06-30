@@ -1,10 +1,14 @@
-//===-- llvm/ ---------------------------------------------------*- C++ -*-===//
+//===-- TMS320C64XMachineFunctionInfo.h -------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
 // This file was developed by Alexander Jordan, Vienna University of Technology,
 // and is distributed under the University of Illinois Open Source License.
 // See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// Declares and implements the machine function info for the TMS320C64X.
 //
 //===----------------------------------------------------------------------===//
 
