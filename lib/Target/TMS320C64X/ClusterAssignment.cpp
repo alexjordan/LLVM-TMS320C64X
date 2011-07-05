@@ -510,7 +510,7 @@ bool ClusterBug::filterOperand(const SDNode *N, const SDValue &opval,
 
     // calls have a variable number of arguments, but no predicates.
     // it's okay to accept their operands, chain and flag are handled above
-    if (N->getMachineOpcode() == TMS320C64X::callp_p)
+    if (N->getMachineOpcode() == TMS320C64X::callp_global)
       return false;
 
     assert(opIndex < tid.NumOperands);

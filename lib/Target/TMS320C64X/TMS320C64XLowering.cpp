@@ -47,7 +47,9 @@
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/ADT/VectorExtras.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/MC/MCSymbol.h"
 
 using namespace llvm;
 
@@ -226,7 +228,6 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setLibcallName(RTLIB::SINTTOFP_I32_F64, "__fltid");
   setLibcallName(RTLIB::SINTTOFP_I32_F32, "__fltif");
 
-
   // We can generate two conditional instructions for select, not so
   // easy for select_cc
   setOperationAction(ISD::SELECT, MVT::i32, Custom);
@@ -286,26 +287,37 @@ const char *TMS320C64XLowering::getTargetNodeName(unsigned op) const {
     default: return NULL;
     case TMSISD::BRCOND:
       return "TMSISD::BRCOND";
+
     case TMSISD::CALL:
       return "TMSISD::CALL";
-    case TMSISD::CALL_RET_LABEL:
-      return "TMSISD::CALL_RET_LABEL";
-    case TMSISD::CALL_RET_LABEL_OPERAND:
-      return "TMSISD::CALL_RET_LABEL_OPERAND";
+
     case TMSISD::CMPEQ:
       return "TMSISD::CMPEQ";
+
     case TMSISD::CMPNE:
       return "TMSISD::CMPNE";
+
     case TMSISD::CMPGT:
       return "TMSISD::CMPGT";
+
     case TMSISD::CMPGTU:
       return "TMSISD::CMPGTU";
+
     case TMSISD::CMPLT:
       return "TMSISD::CMPLT";
+
     case TMSISD::CMPLTU:
       return "TMSISD::CMPLTU";
-    case TMSISD::RET_FLAG:
-      return "TMSISD::RET_FLAG";
+
+    case TMSISD::RETURN_FLAG:
+      return "TMSISD::RETURN_FLAG";
+
+    case TMSISD::RETURN_LABEL:
+      return "TMSISD::RETURN_LABEL";
+
+    case TMSISD::RETURN_LABEL_OPERAND:
+      return "TMSISD::RETURN_LABEL_OPERAND";
+
     case TMSISD::WRAPPER:
       return "TMSISD::WRAPPER";
   }
@@ -320,6 +332,8 @@ unsigned TMS320C64XLowering::getFunctionAlignment(Function const*) const {
 //-----------------------------------------------------------------------------
 
 using namespace TMS320C64X;
+
+//-----------------------------------------------------------------------------
 
 SDValue
 TMS320C64XLowering::LowerFormalArguments(SDValue Chain,
@@ -456,9 +470,8 @@ TMS320C64XLowering::LowerReturn(SDValue Chain,
   }
 
   if (Flag.getNode())
-    return DAG.getNode(TMSISD::RET_FLAG, dl, MVT::Other, Chain, Flag);
-
-  return DAG.getNode(TMSISD::RET_FLAG, dl, MVT::Other, Chain);
+    return DAG.getNode(TMSISD::RETURN_FLAG, dl, MVT::Other, Chain, Flag);
+  else return DAG.getNode(TMSISD::RETURN_FLAG, dl, MVT::Other, Chain);
 }
 
 //-----------------------------------------------------------------------------
@@ -468,18 +481,16 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
                                       CallingConv::ID CallConv,
                                       bool isVarArg,
                                       bool &isTailCall,
-			              const SmallVectorImpl<ISD::OutputArg> &Outs,
+                                      const SmallVectorImpl<ISD::OutputArg> &Outs,
                                       const SmallVectorImpl<SDValue> &OutVals,
-			              const SmallVectorImpl<ISD::InputArg> &Ins,
-			              DebugLoc dl,
+                                      const SmallVectorImpl<ISD::InputArg> &Ins,
+                                      DebugLoc dl,
                                       SelectionDAG &DAG,
-			              SmallVectorImpl<SDValue> &InVals) const
+                                      SmallVectorImpl<SDValue> &InVals) const
 {
   SmallVector<CCValAssign, 16> ArgLocs;
-  unsigned retaddr, arg_idx, fixed_args;
-  bool is_icall = false;;
+  unsigned arg_idx, fixed_args;
 
-  retaddr = 0;
   arg_idx = 0;
   fixed_args = 0;
 
@@ -564,9 +575,9 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
 
   // We now have two sets of register / stack locations to load stuff
   // into; apparently we can put the memory location ones into one big
-  // chain, because they can happen independantly
+  // chain, because they can happen independently
 
-  SDValue in_flag;
+  SDValue InFlag;
 
   if (!stack_args.empty()) {
     Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
@@ -576,8 +587,8 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
   // This chains loading to specified registers sequentially
   for (unsigned i = 0; i < reg_args.size(); ++i) {
     Chain = DAG.getCopyToReg(Chain, dl, reg_args[i].first,
-                             reg_args[i].second, in_flag);
-    in_flag = Chain.getValue(1);
+                             reg_args[i].second, InFlag);
+    InFlag = Chain.getValue(1);
   }
 
   // Following what MSP430 does, convert GlobalAddress nodes to
@@ -590,7 +601,8 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
     Callee = DAG.getTargetExternalSymbol(e->getSymbol(), MVT::i32);
   }
 
-  // Tie this all into a "Call"
+  // Tie this all into a "call", return a chain and a glue
+  SDVTList OperandTys = DAG.getVTList(MVT::Other, MVT::Glue);
   SmallVector<SDValue, 16> ops;
   ops.push_back(Chain);
   ops.push_back(Callee);
@@ -600,64 +612,71 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
                   reg_args[i].second.getValueType()));
   }
 
-  if (Callee.getOpcode() != ISD::TargetGlobalAddress
-  && Callee.getOpcode() != ISD::GlobalAddress
-  && Callee.getOpcode() != ISD::TargetExternalSymbol
-  && Callee.getOpcode() != ISD::ExternalSymbol)
-  {
-    // This an indirect call.
-    // Unfortunately there's no direct call instruction for this...
-    // we have to emulate it. That involves sticking a label
-    // directly after the call/branch, and loading its address into
-    // b3 directly beforehand. Ugh.
+  if (InFlag.getNode()) ops.push_back(InFlag);
 
-    assert(false && "Can not yet generate label ID!");
+  const bool isIndirectCall = (
+    Callee.getOpcode() != ISD::TargetGlobalAddress &&
+    Callee.getOpcode() != ISD::GlobalAddress &&
+    Callee.getOpcode() != ISD::TargetExternalSymbol &&
+    Callee.getOpcode() != ISD::ExternalSymbol);
 
-    // Generate a return address
+  if (isIndirectCall) {
 
-    // TODO, dont know how to handle this yet, since the label-id
-    // generation is not maintained by the module info any more
-/*
-    MachineModuleInfo *MMI = DAG.getMachineModuleInfo();
-    retaddr = MMI->NextLabelID();
-    in_flag = Chain.getValue(0);
+    // Unfortunately there's no direct call instruction for this. We have to
+    // emulate it. That involves sticking a label directly after the call/
+    // branch, and loading its address into B3 directly beforehand. Ugh...
 
-    SDVTList NodeTys = DAG.getVTList(MVT::i32, MVT::Flag);
-    Chain = DAG.getNode(TMSISD::CALL_RET_LABEL_OPERAND, dl, NodeTys,
-                        Chain, DAG.getConstant(retaddr, MVT::i32), in_flag);
+    MachineFunction &MF = DAG.getMachineFunction();
+    MachineModuleInfo &MMI = MF.getMMI();
 
-    in_flag = Chain.getValue(1);
-    Chain = DAG.getCopyToReg(Chain, dl, TMS320C64X::B3, Chain, in_flag);
+    // generate a unique label for the return from the call, the address of
+    // the label will be put into B3 and supplied to the callee to be able
+    // to return from the subroutine
+    MCSymbol *indirectCallOperand = MMI.getContext().CreateTempSymbol();
+    const char *retLabName = indirectCallOperand->getName().data();
 
-    in_flag = Chain.getValue(1);
-*/
-    is_icall = true;
+    SDValue glueVal = Chain.getValue(0);
+    SDVTList NodeTys = DAG.getVTList(MVT::i32, MVT::Other, MVT::Glue);
+
+    // NKim, HACK, mark the node as an external symbol for the time being.
+    // This node references the external symbol as a label operand, has a
+    // glue-value and also extends and propagates the chain-value
+    Chain = DAG.getNode(TMSISD::RETURN_LABEL_OPERAND, dl, NodeTys, Chain,
+      DAG.getTargetExternalSymbol(retLabName, getPointerTy(), 1), glueVal);
+
+    // to be sure, that the immediate (the label address) is going to land
+    // in B3 we also insert a copy-to-reg node, which has three operands,
+    // Value 0 is the source value, Value 1 the chain and Value 2 the glue
+    Chain = DAG.getCopyToReg(Chain.getValue(1), dl, TMS320C64X::B3,
+                             Chain.getValue(0), Chain.getValue(2));
+
+    // the previously inserted node does provide a chain and a glue
+    assert(Chain.getValue(0).getNode() && Chain.getValue(1).getNode() &&
+      "Bad chain values detected for the indirect call DAG node!");
+
+    // allow more scheduler freedom
+    // ops[0] = Chain.getValue(0);
+    ops.push_back(Chain.getValue(1));
+    Chain = DAG.getNode(TMSISD::CALL, dl, OperandTys, &ops[0], ops.size());
+
+    // now we have to mark the node apropriately to avoid funny surprises
+    // (such as machine-dce removing the label, etc.)
+    NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+    Chain = DAG.getNode(TMSISD::RETURN_LABEL, dl, NodeTys, Chain,
+      DAG.getTargetExternalSymbol(retLabName, getPointerTy(), 0),
+      Chain.getValue(1));
+  }
+  else {
+    // now insert a regular call node for the non-register calls, which is
+    // actually for sure by far the majority of all call-instructions
+    Chain = DAG.getNode(TMSISD::CALL, dl, OperandTys, &ops[0], ops.size());
   }
 
-  if (in_flag.getNode()) ops.push_back(in_flag);
-
-  SDVTList node_types = DAG.getVTList(MVT::Other, MVT::Glue);
-  Chain = DAG.getNode(TMSISD::CALL, dl, node_types, &ops[0], ops.size());
-  in_flag = Chain.getValue(1);
-
-  if (is_icall) {
-    // pump in a label directly after that call insn
-    SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
-    Chain = DAG.getNode(TMSISD::CALL_RET_LABEL, dl, NodeTys,
-                        Chain, DAG.getConstant(retaddr, MVT::i32), in_flag);
-
-    in_flag = Chain.getValue(1);
-  }
-
-  Chain = DAG.getCALLSEQ_END(Chain,
-                             DAG.getConstant(stacksize, MVT::i32),
-                             DAG.getTargetConstant(0, MVT::i32),
-                             in_flag);
-
-  in_flag = Chain.getValue(1);
+  Chain = DAG.getCALLSEQ_END(Chain, DAG.getConstant(stacksize, MVT::i32),
+    DAG.getTargetConstant(0, MVT::i32), Chain.getValue(1));
 
   return LowerCallResult(
-    Chain, in_flag, CallConv, isVarArg, Ins, dl, DAG, InVals);
+    Chain, Chain.getValue(1), CallConv, isVarArg, Ins, dl, DAG, InVals);
 }
 
 //-----------------------------------------------------------------------------
@@ -671,15 +690,13 @@ SDValue TMS320C64XLowering::LowerCallResult(SDValue Chain,
                                             SelectionDAG &DAG,
                                             SmallVectorImpl<SDValue> &InVals) const
 {
-  unsigned int i;
-
   SmallVector<CCValAssign, 16> ret_locs;
   CCState CCInfo(
     CallConv, isVarArg, getTargetMachine(), ret_locs, *DAG.getContext());
 
   CCInfo.AnalyzeCallResult(Ins, RetCC_TMS320C64X);
 
-  for (i = 0; i < ret_locs.size(); ++i) {
+  for (unsigned i = 0; i < ret_locs.size(); ++i) {
     Chain = DAG.getCopyFromReg(Chain, dl, ret_locs[i].getLocReg(),
                                           ret_locs[i].getValVT(),
                                           InFlag).getValue(1);

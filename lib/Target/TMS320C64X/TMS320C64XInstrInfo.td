@@ -24,24 +24,52 @@
 // THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //===----------------------------------------------------------------------===//
 
-// misc, to begin with
+////////////////////////
+/// Type constraints ///
+////////////////////////
 
-def BUNDLE_END : pseudoinst<(outs), (ins), "${:comment} BUNDLE_END", []>;
-def BR_OCCURS : pseudoinst<(outs), (ins), "${:comment} branch occurs", []> {
-  let isTerminator = 1;
-}
+// standard type constraint definitions for the call-sequence-start, call-seq-
+// end the call node. NOTE, -1 specified for the call type-constraint signals,
+// that the node may take a variable number of arguments
 
-def SDT_Wrapper : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisPtrTy<0>]>;
-def SDT_brcond : SDTypeProfile<0, 3, [SDTCisVT<0, OtherVT>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
-def SDT_call : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
 def SDT_call_seq_start : SDCallSeqStart<[SDTCisVT<0, i32>]>;
 def SDT_call_seq_end : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
-def SDT_call_ret_label : SDTypeProfile<0, 1, [SDTCisVT<0, i32>]>;
-def SDT_call_ret_label_operand : SDTypeProfile<1, 1, [SDTCisVT<0, i32>,
-							SDTCisVT<1, i32>]>;
+def SDT_call : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+
+// NKim, type constraints for the node corresponding to the loading of a label
+// into a TI register (B3), to be able to return back from the subroutine which
+// is called indirectly
+
+def SDT_call_label_operand : SDTypeProfile<1, 1,
+                                           [SDTCisVT<0, i32>,
+                                            SDTCisVT<1, iPTR>]>;
+
+// NKim, type constraints for the node which corresponds to the actual return
+// node for the indirectly called subroutine. This is represented as a targets
+// external symbol for now and represents a simple label
+
+def SDT_call_return_label : SDTypeProfile<0, 1, [SDTCisVT<0, iPTR>]>;
+
+// type constraints for the node corresponding to a conditional branch, this
+// node does not produce anything, takes 3 arguments, a conditional chain, and
+// two alternative outcomes
+
+def SDT_brcond : SDTypeProfile<0, 3, [SDTCisVT<0, OtherVT>,
+                                     SDTCisVT<1, i32>,
+                                     SDTCisVT<2, i32>]>;
+
+// type constraints for the target specific TI implementation of the select-
+// instruction
+
 def SDT_tmsselect : SDTypeProfile<1, 4, [SDTCisVT<0, i32>, SDTCisVT<1, i32>,
-					SDTCisVT<2, i32>, SDTCisVT<3, i32>,
-					SDTCisVT<4, i32>]>;
+                                        SDTCisVT<2, i32>, SDTCisVT<3, i32>,
+                                        SDTCisVT<4, i32>]>;
+
+def SDT_Wrapper : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisPtrTy<0>]>;
+
+////////////////////////
+/// Node definitions ///
+////////////////////////
 
 def brcond_node : SDNode<"TMSISD::BRCOND", SDT_brcond, [SDNPHasChain]>;
 
@@ -51,14 +79,22 @@ def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_call_seq_start,
 def callseq_end : SDNode<"ISD::CALLSEQ_END", SDT_call_seq_end,
 				[SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 
-def call_ret_label : SDNode<"TMSISD::CALL_RET_LABEL", SDT_call_ret_label,
-				[SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
-				SDNPSideEffect]>;
+// NKim, actual node corresponding to the node for moving a label into B3
+// register for the subroutine to return to, example "move .tmpLabel, B3"
 
-def call_ret_label_operand : SDNode<"TMSISD::CALL_RET_LABEL_OPERAND",
-				SDT_call_ret_label_operand,
-				[SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
-				SDNPSideEffect]>;
+def call_label_operand_node : SDNode<"TMSISD::RETURN_LABEL_OPERAND",
+                                      SDT_call_label_operand,
+                                      [SDNPHasChain, SDNPOptInGlue,
+                                      SDNPOutGlue, SDNPSideEffect]>;
+
+// NKim, actual node corresponding to the label for returns from indirectly
+// called subroutines, this label is to be emitted just after the actual
+// branch (bnop) instruction has been issued
+
+def call_return_label_node : SDNode<"TMSISD::RETURN_LABEL",
+                                     SDT_call_return_label,
+                                     [SDNPHasChain, SDNPOptInGlue,
+                                     SDNPOutGlue, SDNPSideEffect]>;
 
 def cmpeq_node : SDNode<"TMSISD::CMPEQ", SDTIntBinOp,
 				[SDNPOutGlue, SDNPCommutative]>;
@@ -76,6 +112,11 @@ def cmpltu_node : SDNode<"TMSISD::CMPLTU", SDTIntBinOp, [SDNPOutGlue]>;
 def tmsselect : SDNode<"TMSISD::SELECT", SDT_tmsselect>;
 
 def Wrapper : SDNode<"TMSISD::WRAPPER", SDT_Wrapper>;
+
+def BUNDLE_END : pseudoinst<(outs), (ins), "${:comment} BUNDLE_END", []>;
+def BR_OCCURS : pseudoinst<(outs), (ins), "${:comment} branch occurs", []> {
+  let isTerminator = 1;
+}
 
 // XXX These should probably be marked as for codegen modelling only.
 // Don't have flexibility to test right now though.
@@ -127,9 +168,10 @@ def call_end_r : inst<(outs), (ins GPRegs:$val, i32imm:$val2),
 }
 
 def TMS320C64Xcall : SDNode<"TMSISD::CALL", SDT_call,
-				[SDNPHasChain, SDNPOutGlue, SDNPOptInGlue]>;
+                            [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue]>;
 
-def retflag : SDNode<"TMSISD::RET_FLAG", SDTNone, [SDNPHasChain, SDNPOptInGlue]>;
+def retflag : SDNode<"TMSISD::RETURN_FLAG", SDTNone,
+                     [SDNPHasChain, SDNPOptInGlue]>;
 
 // FIXME: mv can be in any s/d/l slot
 let neverHasSideEffects = 1 in {
@@ -263,21 +305,51 @@ def : Pat<(i32 (Wrapper tglobaladdr:$val)),
 	(mvkh_p tglobaladdr:$val, (mvkl_p tglobaladdr:$val))>;
 def : Pat<(i32 (Wrapper tjumptable:$dst)),
 	(mvkh_p tjumptable:$dst, (mvkl_p tjumptable:$dst))>;
+def : Pat<(i32 (Wrapper texternalsym:$dst)),
+        (mvkh_p texternalsym:$dst, (mvkl_p texternalsym:$dst))>;
 
-let InOperandList = (ins call_ret_label_operand_operand:$imm, pred:$s),
-		AsmString = "mvkl\t.S1\t$imm,\t$dst" in {
-def mvkl_label : pseudo_rr<"mvkl", "", unit_s, add, 0> {
-	let Pattern = [];
-}
+// this instruction extracts the lower 16 bits of the supplied immediate value,
+// sign-extends it to the register width and puts the result into the register.
+// NOTE, it seems the label loading into a register must be done on the S2 unit
+
+def mvkl_return_label : inst<(outs GPRegs:$dst),
+                             (ins LabelOperand:$label, pred:$prd),
+                             "mvkl\t.S2\t$label,\t$dst", [], 0, unit_s>;
+
+// this instruction extends the supplied source register by sign extended upper
+// portion (16 bit) of the immediate (label) operand. This way we can move a 32
+// bit immediate into a register
+
+def mvkh_return_label : inst<(outs GPRegs:$dst),
+                             (ins LabelOperand:$label, GPRegs:$src1, pred:$prd),
+                             "mvkh\t.S2\t$label,\t$dst", [], 0, unit_s>
+{
+  let Constraints = "$src1 = $dst";
 }
 
-def mvkh_label : inst<(outs GPRegs:$dst), (ins call_ret_label_operand_operand:$imm, GPRegs:$src1),
-		"mvkh\t.S1\t$imm,\t$dst", [], 0, unit_s> {
-	let Constraints = "$src1 = $dst";
+// NKim, instruction for emitting a returning pad for an indirectly called rou-
+// tine. I model this as a pseudo-instruction, since this correspond to a label.
+// NOTE, we need to signal, that this pseudo-instruction may have side-effects
+// in order not to be eliminated by the optimizers !
+
+def call_return_label : pseudoinst<(outs), (ins LabelOperand:$label),
+                                   "$label:\t\t${:comment} return label", []>
+{
+  let isCodeGenOnly = 0;
+  let neverHasSideEffects = 0;
+  let isPredicable = 0;
 }
 
-def : Pat<(call_ret_label_operand mvk_all_pred:$label),
-	(mvkh_label mvk_all_pred:$label, (mvkl_label mvk_all_pred:$label))>;
+// NKim, we now do this, since the TI does only support signed 16 bit constant-
+// quantities. To allow jumps/jsr beyond that range, we issue two instructions
+// for loading the upper and a lower part of the constant into a 32 bit TI-reg
+
+def : Pat<(call_label_operand_node texternalsym:$label),
+          (mvkh_return_label texternalsym:$label,
+          (mvkl_return_label texternalsym:$label))>;
+
+def : Pat<(call_return_label_node texternalsym:$label),
+          (call_return_label texternalsym:$label)>;
 
 // FIXME: Work out what on earth to do with lea
 def lea_fail : inst<(outs ARegs:$dst), (ins mem_operand:$ptr),
@@ -359,25 +431,36 @@ def : Pat<(i32 mvk_all_pred:$val),
 
 // Branch / call instructions
 
-let isTerminator = 1, isBranch = 1, DelaySlots = 5, hasDelaySlot = 1 in {
-def branch_p : inst<(outs), (ins brtarget:$block), "b\t.S1\t$block",
-                                [(br bb:$block)], 0, unit_s> {
-        let Pattern = sched_pattern;
+let isTerminator = 1,
+    isBranch = 1,
+    DelaySlots = 5,
+    hasDelaySlot = 1 in
+{
+def branch_p : inst<(outs), (ins BranchTargetOperand:$block), "b\t.S1\t$block",
+                    [(br bb:$block)], 0, unit_s>
+{
+  let Pattern = sched_pattern;
 }
 
-def branch_1 : inst<(outs), (ins brtarget:$block), "b\t.S1\t$block",
+def branch_1 : inst<(outs), (ins BranchTargetOperand:$block), "b\t.S1\t$block",
                                 [(br bb:$block)], 0, unit_s>;
-def branch_2 : inst<(outs), (ins brtarget:$block), "b\t.S2\t$block",
+
+def branch_2 : inst<(outs), (ins BranchTargetOperand:$block), "b\t.S2\t$block",
                                 [(br bb:$block)], 1, unit_s>;
 
-def brcond_p : nopred_inst<(outs), (ins brtarget:$block), "b\t.S1\t$block",
-		[(brcond_node bb:$block, timm:$a, predwrapper1:$b)], 0, unit_s>{
-	let Pattern = sched_pattern;
+def brcond_p : nopred_inst<(outs),
+                           (ins BranchTargetOperand:$block), "b\t.S1\t$block",
+                           [(brcond_node bb:$block, timm:$a, predwrapper1:$b)],
+                           0, unit_s>
+{
+  let Pattern = sched_pattern;
 }
 
-def bindirect_2 : inst<(outs), (ins GPRegs:$reg), "bnop\t.S2X\t$reg,\t5",
-				[(brind GPRegs:$reg)], 1, unit_s> {
-	let Pattern = sched_pattern;
+def bindirect_2 : inst<(outs),
+                       (ins GPRegs:$reg), "bnop\t.S2X\t$reg,\t5",
+                       [(brind GPRegs:$reg)], 1, unit_s>
+{
+  let Pattern = sched_pattern;
 }
 } // isBranch
 
@@ -398,36 +481,32 @@ let isCall = 1, isPredicable = 0,
 // upon. So callp .S1 puts ret in A3, which isn't consistent with the TI
 // calling convention.
 
-def callp_p : inst<(outs), (ins calltarget:$dst, variable_ops),
-                        "callp\t.S2\t$dst,\tB3", [(TMS320C64Xcall tglobaladdr:$dst)],
-                        1, unit_s> {
-        let Pattern = sched_pattern;
-}
-
-def callp_e_p : inst<(outs), (ins calltarget:$dst, variable_ops),
+// this is a call issued to an address which is globally visible
+def callp_global : inst<(outs), (ins CallTargetOperand:$dst, variable_ops),
                         "callp\t.S2\t$dst,\tB3",
-                        [(TMS320C64Xcall texternalsym:$dst)], 1, unit_s> {
-        let Pattern = sched_pattern;
+                        [(TMS320C64Xcall tglobaladdr:$dst)], 1, unit_s>
+{
+  let Pattern = sched_pattern;
 }
 
-def call_indirect_2 : inst<(outs), (ins GPRegs:$reg, variable_ops),
-                                "bnop\t.S2X\t$reg,\t5",
-                                [(TMS320C64Xcall GPRegs:$reg)],
-                                1, unit_s> {
-        let Pattern = sched_pattern;
-        let Uses = [B3];
-}
+// this is a call issued to a symbol which is defined externally
+def callp_extsym : inst<(outs), (ins CallTargetOperand:$dst, variable_ops),
+                        "callp\t.S2\t$dst,\tB3",
+                        [(TMS320C64Xcall texternalsym:$dst)], 1, unit_s>
+{
+  let Pattern = sched_pattern;
 }
 
-// Hacks: the processor doesn't _actually_ have a real call instruction, callp
-// was introduced by c64x+, and there's no support at all for indirect calls.
-// So we have to work by loading the return address into B3 manually before
-// branching to the target. Which means injecting a label immediately after the
-// branch instruction itself. Which is what this is.
-def return_label : inst<(outs), (ins i32imm:$imm), ".retaddr_$imm:",
-				[(call_ret_label imm:$imm)], 0, unit_m> {
-	let Pattern = sched_pattern;
+// NKim, indirect call, this actually produces the same code as an indirect
+// branch, however, the semantics are slightly different as you can think
+def call_reg : inst<(outs), (ins GPRegs:$reg, variable_ops),
+                    "bnop\t.S2X\t$reg,\t5",
+                    [(TMS320C64Xcall GPRegs:$reg)], 1, unit_s>
+{
+  let Pattern = sched_pattern;
+  let Uses = [B3];
 }
+} // isCall
 
 // NB: branch-to-register can only work on unit S2
 // Epilogue code should juggle the return addr into B3.

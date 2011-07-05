@@ -48,17 +48,17 @@ TMS320C64XTargetMachine::TMS320C64XTargetMachine(const Target &T,
 : LLVMTargetMachine(T, TT),
   DataLayout("e-p:32:32:32-i8:8:8-i16:16:16-i32:32:32-f32:32:32-f64:64:64-n32"),
 
-  /* No float types - could define n40, in that the DSP supports 40 bit
-   * arithmatic, however it doesn't support it for all logic operations,
-   * only a variety of alu ops. */
-//  InstrInfo(*this),
+  // No float types - could define n40, in that the DSP supports 40 bit
+  // arithmetic, however it doesn't support it for all logic operations,
+  // only a variety of alu ops.
   InstrInfo(),
   Subtarget(TT, FS),
   TLInfo(*this),
+  TSInfo(*this),
 
 // NKIM, FrameInfo non-existant for llvm-2.9. The functionality is mainly
 // moved to FrameLowering, also the stack-alignment params are not passed
-// by hard-coded within the constructor
+// but hard-coded within the constructor
 //  FrameInfo(TargetFrameInfo::StackGrowsDown, 8, -4)
   FrameLowering(*this)
 {}

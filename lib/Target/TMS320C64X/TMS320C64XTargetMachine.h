@@ -30,6 +30,7 @@
 #include "TMS320C64XInstrInfo.h"
 #include "TMS320C64XLowering.h"
 #include "TMS320C64XFrameLowering.h"
+#include "TMS320C64XSelectionDAGInfo.h"
 #include "TMS320C64XHazardRecognizer.h"
 #include "TMS320C64XSubtarget.h"
 
@@ -44,6 +45,7 @@ class TMS320C64XTargetMachine : public LLVMTargetMachine {
     TMS320C64XInstrInfo		InstrInfo;
     TMS320C64XSubtarget		Subtarget;
     TMS320C64XLowering		TLInfo;
+    TMS320C64XSelectionDAGInfo  TSInfo;
     TMS320C64XFrameLowering     FrameLowering;
     InstrItineraryData          InstrItins;
 
@@ -75,6 +77,10 @@ class TMS320C64XTargetMachine : public LLVMTargetMachine {
 
     virtual TMS320C64XLowering *getTargetLowering() const {
       return const_cast<TMS320C64XLowering*>(&TLInfo);
+    }
+
+    virtual const TMS320C64XSelectionDAGInfo *getSelectionDAGInfo() const {
+      return &TSInfo;
     }
 
     virtual const InstrItineraryData *getInstrItineraryData() const {

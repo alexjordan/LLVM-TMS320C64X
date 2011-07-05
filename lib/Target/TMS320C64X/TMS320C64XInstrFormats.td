@@ -24,6 +24,24 @@
 // THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //===----------------------------------------------------------------------===//
 
+///////////////////////////
+/// OPERAND DEFINITIONS ///
+///////////////////////////
+
+// NKim, this operand is useful when dealing with indirect calls specific
+// to the TI which does not natively support register calls. Now, as a work-
+// around we create a label, push it into B3, issue a call, and then put
+// the label right after the call-instruction
+
+def LabelOperand : Operand<iPTR>;
+
+// This input operand is used for the regular (non register) calls, which go
+// to a global address or to an external symbol
+
+def CallTargetOperand : Operand<i32>;
+
+def BranchTargetOperand : Operand<OtherVT>;
+
 class UnitSupport<bit l, bit s, bit m, bit d> {
   bits<4> units = { d, m, s, l };
 }
@@ -60,12 +78,6 @@ def side_b : InstSide<1,1>;
 def mem_operand	: Operand<i32> {
 	let PrintMethod = "printMemOperand";
 	let MIOperandInfo = (ops GPRegs, GPRegs);
-}
-
-def calltarget : Operand<i32>;
-def brtarget : Operand<OtherVT>;
-def call_ret_label_operand_operand : Operand<i32> {
-	let PrintMethod = "printRetLabel";
 }
 
 // NKIM, for the time being we require the root-node to be supplied
@@ -148,7 +160,6 @@ def nodefault_zflag : PredicateOperand<i32, (ops timm), (ops)>;
 def nodefault_reg : PredicateOperand<i32, (ops PredRegs), (ops)>;
 
 // NKIM, supply the root-node to the func, not sure about parent or root
-// def predwrapper1 : ComplexPattern<i32, 1, "bounce_predicate", [], []>;
 def predwrapper1 : ComplexPattern<i32, 1, "bounce_predicate", [], [SDNPWantRoot]>;
 
 class inst<dag outops,

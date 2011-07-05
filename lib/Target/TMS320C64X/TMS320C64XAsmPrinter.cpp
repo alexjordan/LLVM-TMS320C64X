@@ -75,6 +75,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
     bool print_predicate(const MachineInstr *MI,
                          raw_ostream &OS,
                          const char *prefix = "\t");
+
     void emit_prolog(const MachineInstr *MI);
     void emit_epilog(const MachineInstr *MI);
     void emit_inst(const MachineInstr *MI);
@@ -92,8 +93,6 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
     void printMemOperand(const MachineInstr *MI, int opNum, raw_ostream &O);
 
     void printInstruction(const MachineInstr *MI, raw_ostream &O);
-
-    void printRetLabel(const MachineInstr *MI, int opNum, raw_ostream &O);
 
     void printCCOperand(const MachineInstr *MI, int opNum);
 
@@ -124,6 +123,9 @@ TMS320C64XAsmPrinter::TMS320C64XAsmPrinter(TargetMachine &TM, MCStreamer &MCS)
   BundleMode(false),
   BundleOpen(false)
 {
+// exists only in the llvm-2.9 dev-trunk
+// TM.setMCSaveTempLabels(true);
+// OutContext.setAllowTemporaryLabels(true)
 }
 
 //-----------------------------------------------------------------------------
@@ -144,20 +146,24 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   // Due to having to beat predecates manually, we don't use
   // EmitFunctionBody, but instead pump out instructions manually
-  for (MachineFunction::const_iterator I = MF.begin(); I != MF.end(); ++I) {
 
-    if (I != MF.begin()) {
-      EmitBasicBlockStart(I);
+  MachineFunction::const_iterator MBB;
+  for (MBB = MF.begin(); MBB != MF.end(); ++MBB) {
+
+    if (MBB != MF.begin()) {
+      EmitBasicBlockStart(MBB);
       OutStreamer.EmitRawText(StringRef("\n"));
     }
 
-    for (MachineBasicBlock::const_iterator II = I->begin(); II != I->end(); ++II)
-    {
-      unsigned opcode = II->getDesc().getOpcode();
+    MachineBasicBlock::const_iterator MI;
+    for (MI = MBB->begin(); MI != MBB->end(); ++MI) {
 
-      if (opcode == TMS320C64X::prolog) emit_prolog(II);
-      else if (opcode == TMS320C64X::epilog) emit_epilog(II);
-      else emit_inst(II);
+      switch (MI->getDesc().getOpcode()) {
+        case TMS320C64X::prolog: emit_prolog(MI); break;
+        case TMS320C64X::epilog: emit_epilog(MI); break;
+        default: emit_inst(MI); break;
+      }
+
     }
   }
 
@@ -238,37 +244,50 @@ void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
   SmallString<256> instString;
   raw_svector_ostream OS(instString);
 
-  if (MI->getDesc().getOpcode() == TargetOpcode::INLINEASM) {
-    OS << MI->getOperand(0).getSymbolName() << "\n";
-    OutStreamer.EmitRawText(OS.str());
-    return;
-  }
+  switch (MI->getDesc().getOpcode()) {
+    case TargetOpcode::INLINEASM:
+      OS << MI->getOperand(0).getSymbolName();
+      break;
 
-  if (MI->getDesc().getOpcode() == TMS320C64X::BUNDLE_END) {
-    BundleMode = true;
-    BundleOpen = false;
+    case TMS320C64X::BUNDLE_END:
+      BundleMode = true;
+      BundleOpen = false;
 
 #if PRINT_BUNDLE_COMMENTS
-    print_predicate(MI, OS);
-    printInstruction(MI, OS);
-    OutStreamer.EmitRawText(StringRef("\n"));
+      print_predicate(MI, OS);
+      printInstruction(MI, OS);
 #endif
-    return;
-  }
+      break;
 
-  if (BundleMode) {
-    const char *prefix = "\t";
+    case TMS320C64X::call_return_label:
+      /// NOTE, return labels for indirect calls are not predicated, and
+      /// not parallelizable yet, there is no much sense for doing so for
+      /// labels, even if these labels are modeled as real instructions
+      /// (as a work-around)
 
-    if (BundleOpen) prefix = "\t||"; // continue bundle
+      // instead of calling printInstruction we emit the label directly,
+      // this allows us to avoid tabs being inserted automatically
+      assert(MI->getOperand(0).isSymbol() && "Bad symbol operand!");
+      OS << "\n" << MI->getOperand(0).getSymbolName() << ":\t\t"
+         << MAI->getCommentString() << " return label for reg-calls\n";
+      break;
 
-    print_predicate(MI, OS, prefix);
-    printInstruction(MI, OS);
-    BundleOpen = true;
-  }
-  else {
-    print_predicate(MI, OS);
-    printInstruction(MI, OS);
-  }
+    default: {
+      if (BundleMode) {
+        const char *prefix = "\t";
+
+        if (BundleOpen) prefix = "\t||"; // continue bundle
+
+        print_predicate(MI, OS, prefix);
+        printInstruction(MI, OS);
+        BundleOpen = true;
+      }
+      else {
+        print_predicate(MI, OS);
+        printInstruction(MI, OS);
+      }
+    }
+  } // switch
 
   OS << "\n";
   OutStreamer.EmitRawText(OS.str());
@@ -437,17 +456,6 @@ void TMS320C64XAsmPrinter::printOperand(const MachineInstr *MI,
     default:
       llvm_unreachable("Unknown operand type");
   }
-}
-
-//-----------------------------------------------------------------------------
-
-void TMS320C64XAsmPrinter::printRetLabel(const MachineInstr *MI,
-                                         int op_num,
-                                         raw_ostream &OS)
-{
-  OS << ".retaddr_";
-  OS << (int)MI->getOperand(op_num).getImm();
-  return;
 }
 
 //-----------------------------------------------------------------------------
