@@ -282,14 +282,14 @@ def : Pat<(i32 mvk_pred:$val), (mvk_p imm:$val)>;
 // and set 32 bit constants
 
 let InOperandList = (ins i32imm:$imm, pred:$s),
-		AsmString = "mvkl\t.S1\t$imm,\t$dst" in {
+		AsmString = "mvkl\t\t$imm,\t$dst" in {
 def mvkl_p : pseudo_rr<"mvkl", "", unit_s, add, 0> {
 	let Pattern = [];
 }
 }
 
 def mvkh_p : inst<(outs GPRegs:$dst), (ins i32imm:$imm, GPRegs:$src1),
-		"mvkh\t.S1\t$imm,\t$dst", [], 0, unit_s> {
+		"mvkh\t\t$imm,\t$dst", [], 0, unit_s> {
 	let Constraints = "$src1 = $dst";
 }
 
