@@ -189,41 +189,70 @@ TMS320C64XInstrInfo::copyRegToReg(MachineBasicBlock &MBB,
 
 void
 TMS320C64XInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
-		                         MachineBasicBlock::iterator MI,
+                                         MachineBasicBlock::iterator MI,
                                          unsigned srcReg,
-		                         bool isKill,
+                                         bool isKill,
                                          int frameIndex,
-                                         const TargetRegisterClass*,
-                                         const TargetRegisterInfo*) const
+                                         const TargetRegisterClass* RC,
+                                         const TargetRegisterInfo* TRI) const
 {
   DebugLoc DL;
   if  (MI != MBB.end()) DL = MI->getDebugLoc();
+
+  const TargetRegisterClass *rc;
+  if (!TargetRegisterInfo::isPhysicalRegister(srcReg)) {
+    assert(RC);
+    // XXX currently PredRegs don't allocate any B register, but this will not
+    // hold forever, PredRegs probably need to be split into A/B.
+    if (RC == TMS320C64X::PredRegsRegisterClass)
+      rc = TMS320C64X::ARegsRegisterClass;
+    else
+      rc = RC;
+  } else
+    rc = findRegisterSide(srcReg, MBB.getParent());
+
+  // the address is in A15, if the data is on B side, use T2
+  bool xdata = (rc == TMS320C64X::BRegsRegisterClass);
 
   addFormOp(
     addDefaultPred(BuildMI(MBB, MI, DL, get(TMS320C64X::word_store_1))
       .addReg(TMS320C64X::A15).addFrameIndex(frameIndex)
       .addReg(srcReg, getKillRegState(isKill))),
-    TMS320C64XII::unit_d);
+    TMS320C64XII::unit_d, xdata);
 }
 
 //-----------------------------------------------------------------------------
 
 void
 TMS320C64XInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
-		                          MachineBasicBlock::iterator MI,
+                                          MachineBasicBlock::iterator MI,
                                           unsigned dstReg,
                                           int frameIndex,
-		                          const TargetRegisterClass*,
-                                          const TargetRegisterInfo*) const
+                                          const TargetRegisterClass* RC,
+                                          const TargetRegisterInfo* TRI) const
 {
   DebugLoc DL;
   if  (MI != MBB.end()) DL = MI->getDebugLoc();
+
+  const TargetRegisterClass *rc;
+  if (!TargetRegisterInfo::isPhysicalRegister(dstReg)) {
+    assert(RC);
+    // XXX see above
+    if (RC == TMS320C64X::PredRegsRegisterClass)
+      rc = TMS320C64X::ARegsRegisterClass;
+    else
+      rc = RC;
+  } else
+    rc = findRegisterSide(dstReg, MBB.getParent());
+
+  // the address is in A15, if the data is on B side, use T2
+  bool xdata = (rc == TMS320C64X::BRegsRegisterClass);
 
   addFormOp(
     addDefaultPred(BuildMI(MBB, MI, DL, get(TMS320C64X::word_load_1))
       .addReg(dstReg, RegState::Define)
       .addReg(TMS320C64X::A15).addFrameIndex(frameIndex)),
-    TMS320C64XII::unit_d);
+    TMS320C64XII::unit_d, xdata);
 }
 
 //-----------------------------------------------------------------------------
