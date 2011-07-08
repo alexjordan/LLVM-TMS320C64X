@@ -178,7 +178,7 @@ void TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
     "__addd", "__subd", "__mpyd", "__divd",
     "__cmpf", "__cmpd", "__cvtdf", "__cvtfd",
     "__fixdi", "__fixdu", "__fixfi", "__fixfu",
-    "__fltid", "__fltif" };
+    "__fltid", "__fltif", "__fltud", "__fltuf" };
 
   for (unsigned i = 0; i < array_lengthof(FPNames); ++i) {
     if (strcmp(SymbolName, FPNames[i]) == 0) {

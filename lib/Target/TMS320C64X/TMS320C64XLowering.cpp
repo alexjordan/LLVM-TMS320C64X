@@ -227,6 +227,8 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   // Integer to floating-point conversions.
   setLibcallName(RTLIB::SINTTOFP_I32_F64, "__fltid");
   setLibcallName(RTLIB::SINTTOFP_I32_F32, "__fltif");
+  setLibcallName(RTLIB::UINTTOFP_I32_F64, "__fltud");
+  setLibcallName(RTLIB::UINTTOFP_I32_F32, "__fltuf");
 
   // We can generate two conditional instructions for select, not so
   // easy for select_cc
