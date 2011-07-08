@@ -34,7 +34,7 @@
 
 def SDT_call_seq_start : SDCallSeqStart<[SDTCisVT<0, i32>]>;
 def SDT_call_seq_end : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
-def SDT_call : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+def SDT_call : SDTypeProfile<0, 1, [SDTCisVT<0, iPTR>]>;
 
 // NKim, type constraints for the node corresponding to the loading of a label
 // into a TI register (B3), to be able to return back from the subroutine which
@@ -168,7 +168,8 @@ def call_end_r : inst<(outs), (ins GPRegs:$val, i32imm:$val2),
 }
 
 def TMS320C64Xcall : SDNode<"TMSISD::CALL", SDT_call,
-                            [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue]>;
+                            [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                             SDNPVariadic]>;
 
 def retflag : SDNode<"TMSISD::RETURN_FLAG", SDTNone,
                      [SDNPHasChain, SDNPOptInGlue]>;
