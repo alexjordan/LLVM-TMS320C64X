@@ -173,10 +173,10 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 //-----------------------------------------------------------------------------
 
 void TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
-  static const char *FPNames[] = { 
+  static const char *FPNames[] = {
     "__addf", "__subf", "__mpyf", "__divf",
     "__addd", "__subd", "__mpyd", "__divd",
-    "__cmpf", "__cvtdf", "__cvtfd",
+    "__cmpf", "__cmpd", "__cvtdf", "__cvtfd",
     "__fixdi", "__fixdu", "__fixfi", "__fixfu",
     "__fltid", "__fltif" };
 
