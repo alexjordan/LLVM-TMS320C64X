@@ -805,13 +805,21 @@ bool AsmPrinter::doFinalization(Module &M) {
       OutStreamer.EmitSymbolAttribute(Mang->getSymbol(I), MCSA_WeakReference);
     }
   }
-  
+
   // XXX this is a hack for TMS320C64X where we need to .ref all externals.
   // Should not be here, but in the target.
   if (MAI->getWeakRefDirective()) {
+    OutStreamer.AddBlankLine();
     for (Module::const_iterator I = M.begin(), E = M.end();
          I != E; ++I) {
-      if (!I->hasExternalLinkage()) continue;
+      if (!I->isDeclaration() || !I->hasExternalLinkage()) continue;
+      OutStreamer.EmitSymbolAttribute(Mang->getSymbol(I),
+                                      MCSA_WeakReference);
+    }
+
+    for (Module::const_global_iterator I = M.global_begin(), E = M.global_end();
+         I != E; ++I) {
+      if (I->hasInitializer()) continue;
       OutStreamer.EmitSymbolAttribute(Mang->getSymbol(I),
                                       MCSA_WeakReference);
     }
