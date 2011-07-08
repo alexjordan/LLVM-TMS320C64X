@@ -643,6 +643,8 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
     // NKim, HACK, mark the node as an external symbol for the time being.
     // This node references the external symbol as a label operand, has a
     // glue-value and also extends and propagates the chain-value
+    // AJO: note the target flag '1' is being passed to tell a symbol apart from
+    // a label.
     Chain = DAG.getNode(TMSISD::RETURN_LABEL_OPERAND, dl, NodeTys, Chain,
       DAG.getTargetExternalSymbol(retLabName, getPointerTy(), 1), glueVal);
 

@@ -24,6 +24,7 @@
 // THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "amsprinter"
 #include "TMS320C64X.h"
 #include "TMS320C64XInstrInfo.h"
 #include "TMS320C64XRegisterInfo.h"
@@ -47,6 +48,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -70,7 +73,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
 
     const char *getRegisterName(unsigned RegNo);
 
-    void handleSoftFloatCall(const char* SymbolName);
+    bool handleSoftFloatCall(const char* SymbolName);
 
     bool print_predicate(const MachineInstr *MI,
                          raw_ostream &OS,
@@ -172,7 +175,7 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
 //-----------------------------------------------------------------------------
 
-void TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
+bool TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
   static const char *FPNames[] = {
     "__addf", "__subf", "__mpyf", "__divf",
     "__addd", "__subd", "__mpyd", "__divd",
@@ -185,9 +188,10 @@ void TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
       Module *M = const_cast<Module*>(MMI->getModule());
       M->getOrInsertFunction(SymbolName + 1, // skip underscore at beginning
                              Type::getVoidTy(M->getContext()), NULL);
-      break;
+      return true;
     }
   }
+  return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -422,6 +426,16 @@ void TMS320C64XAsmPrinter::printOperand(const MachineInstr *MI,
   const MachineOperand &MO = MI->getOperand(op_num);
   const TargetRegisterInfo &RI = *TM.getRegisterInfo();
 
+  switch(MO.getTargetFlags()) {
+    case 0: break; /* no flags */
+    case 1:
+      DEBUG(dbgs() << "Target flag detected: "
+            << (int) MO.getTargetFlags() << "\n");
+      break;
+    default: llvm_unreachable("unknown target flag");
+  }
+
+
   switch(MO.getType()) {
     case MachineOperand::MO_Register:
       if (TargetRegisterInfo::isPhysicalRegister(MO.getReg()))
@@ -444,8 +458,17 @@ void TMS320C64XAsmPrinter::printOperand(const MachineInstr *MI,
       break;
 
     case MachineOperand::MO_ExternalSymbol:
-      handleSoftFloatCall(MO.getSymbolName());
-      OS << MO.getSymbolName();
+      if (MO.getTargetFlags() ||
+          handleSoftFloatCall(MO.getSymbolName())) {
+        // the target flag is set, meaning that this is a local label lowered as
+        // an external symbol, or an already mangled call to softfloat function.
+        // leave the symbol/label name as is.
+        OS << MO.getSymbolName();
+      } else {
+        // symbol name needs mangling
+        Mang->getNameWithPrefix(NameStr, MO.getSymbolName());
+        OS << NameStr;
+      }
       break;
 
     case MachineOperand::MO_JumpTableIndex:
