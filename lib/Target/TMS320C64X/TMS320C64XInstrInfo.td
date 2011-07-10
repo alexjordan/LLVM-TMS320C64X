@@ -34,7 +34,12 @@
 
 def SDT_call_seq_start : SDCallSeqStart<[SDTCisVT<0, i32>]>;
 def SDT_call_seq_end : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
-def SDT_call : SDTypeProfile<0, 1, [SDTCisVT<0, iPTR>]>;
+
+// it seems, the -1 signaling a node being variadic doesn't really change much
+// in llvm 2.9. With or without the node being explicitly declared as Variadic
+// both, 1 and -1 work for us now. I leave it this way for compatibility
+
+def SDT_call : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
 
 // NKim, type constraints for the node corresponding to the loading of a label
 // into a TI register (B3), to be able to return back from the subroutine which
@@ -176,14 +181,6 @@ def retflag : SDNode<"TMSISD::RETURN_FLAG", SDTNone,
 
 // FIXME: mv can be in any s/d/l slot
 let neverHasSideEffects = 1 in {
-let AsmString = "mv\t\t$in,\t$out" in {
-def mv : inst<(outs GPRegs:$out), (ins GPRegs:$in), "", [], 0, unit_s>;
-def mv1 : inst<(outs GPRegs:$out), (ins GPRegs:$in), "", [], 0, unit_s>;
-}
-
-def mv2 : inst<(outs GPRegs:$out), (ins GPRegs:$in), "mv\t.S2\t$in,\t$out",
-				 [], 1, unit_s>;
-
 def noop : inst<(outs), (ins i32imm:$cycles), "nop\t\t$cycles", [],
                                 0, unit_s>;
 }
@@ -261,72 +258,65 @@ let DelaySlots = 3,
 def mpy32_p : pseudo_rr<"mpy32", ".M1", unit_m, mul, 0>;
 }
 
-// Loading consts: almost always as halfwords. Put our own bodges on top
-// of these instruction definitions - we want the simple specifications for
-// pseudo and real instructions, but also to eliminate the register operand.
-// We also don't want to pattern match anything, use explicit patterns for that
-let InOperandList = (ins i32imm:$imm, pred:$s),
-			AsmString = "mvk\t.S1\t$imm,\t$dst" in {
-def mvk_p : pseudo_rr<"mvk", ".S1", unit_s, add, 0> {
-	let Pattern = [];
-}
-}
+///////////////////////////////////////////////////////////////////////////////
+// MOVE instructions                                                         //
+///////////////////////////////////////////////////////////////////////////////
 
-// Match ints in the mvk range
-def : Pat<(i32 mvk_pred:$val), (mvk_p imm:$val)>;
+// FIXME, a move instruction, as well as a mvk or mvkh/mvkl for immediates can
+// be issued on an of the S, D, L units. For the time being we assign them to
+// the S unit only, resp. leave the unit selection up to the assembler
 
-// mvkl/mvkh: doesn't look like llvm can express setting a bitfield in a
-// register, and these two insns only set a halfword in one reg. So the only
-// full way of expressing this would be to split gpregs into halfword regs.
-// Instead, don't let mvkl/mvkh match anything, and use a pattern to match
-// and set 32 bit constants
+def mv : moveInstr<(outs GPRegs:$dst), (ins GPRegs:$src),
+                   "mv\t$src,\t$dst", 0, unit_s>;
 
-let InOperandList = (ins i32imm:$imm, pred:$s),
-		AsmString = "mvkl\t\t$imm,\t$dst" in {
-def mvkl_p : pseudo_rr<"mvkl", "", unit_s, add, 0> {
-	let Pattern = [];
-}
-}
+defm mvkl : moveLowInstr<"mvkl", "", 0>;
+defm mvkh : moveHighInstr<"mvkh", "", 0>;
 
-def mvkh_p : inst<(outs GPRegs:$dst), (ins i32imm:$imm, GPRegs:$src1),
-		"mvkh\t\t$imm,\t$dst", [], 0, unit_s> {
-	let Constraints = "$src1 = $dst";
-}
+// the same principle here too, for gen-purpose registers leave the unit un-
+// specified, for A resp. B reg files specify the execution unit explicitly.
+// This will allow an easier extending in future
 
-let Constraints = "$src1 = $dst" in {
-def mvkh_1 : inst<(outs ARegs:$dst), (ins i32imm:$imm, ARegs:$src1),
-		"mvkh\t.S1\t$imm,\t$dst", [], 0, unit_s>;
-def mvkh_2 : inst<(outs BRegs:$dst), (ins i32imm:$imm, BRegs:$src1),
-		"mvkh\t.S2\t$imm,\t$dst", [], 1, unit_s>;
-}
-
-def : Pat<(i32 mvk_all_pred:$val),
-	(mvkh_p mvk_all_pred:$val, (mvkl_p mvk_all_pred:$val))>;
-def : Pat<(i32 (Wrapper tglobaladdr:$val)),
-	(mvkh_p tglobaladdr:$val, (mvkl_p tglobaladdr:$val))>;
-def : Pat<(i32 (Wrapper tjumptable:$dst)),
-	(mvkh_p tjumptable:$dst, (mvkl_p tjumptable:$dst))>;
-def : Pat<(i32 (Wrapper texternalsym:$dst)),
-        (mvkh_p texternalsym:$dst, (mvkl_p texternalsym:$dst))>;
-
-// this instruction extracts the lower 16 bits of the supplied immediate value,
-// sign-extends it to the register width and puts the result into the register.
-// NOTE, it seems the label loading into a register must be done on the S2 unit
-
-def mvkl_return_label : inst<(outs GPRegs:$dst),
-                             (ins LabelOperand:$label, pred:$prd),
-                             "mvkl\t.S2\t$label,\t$dst", [], 0, unit_s>;
-
-// this instruction extends the supplied source register by sign extended upper
-// portion (16 bit) of the immediate (label) operand. This way we can move a 32
-// bit immediate into a register
-
-def mvkh_return_label : inst<(outs GPRegs:$dst),
-                             (ins LabelOperand:$label, GPRegs:$src1, pred:$prd),
-                             "mvkh\t.S2\t$label,\t$dst", [], 0, unit_s>
+let isMoveImm = 1 in
 {
-  let Constraints = "$src1 = $dst";
+  def mvk : moveInstr<(outs GPRegs:$dst), (ins i32imm:$imm, pred:$prd),
+                      "mvk\t$imm,\t$dst", 0, unit_s>;
+
+  def mvk_A : moveInstr<(outs ARegs:$dst), (ins i32imm:$imm, pred:$prd),
+                        "mvk\t.S1\t$imm,\t$dst", 0, unit_s>;
+
+  def mvk_B : moveInstr<(outs BRegs:$dst), (ins i32imm:$imm, pred:$prd),
+                        "mvk\t.S2\t$imm,\t$dst", 0, unit_s>;
+} // isMoveImm
+
+// mvd instruction can be issued on the M unit only. The instruction as such
+// is not that important, since i doubt there will be many situations where it
+// would be more profitable compared to a regular non-delayed move
+
+let hasDelaySlot = 1, DelaySlots = 3 in
+{
+  def mvd : moveInstr<(outs GPRegs:$dst), (ins GPRegs:$src),
+                      "mvd\t.M1\t$src,\t$dst", 0, unit_m>;
 }
+
+// move appropriate immediates (signed16) directly
+def : Pat<(i32 isSigned16imm:$val), (mvk imm:$val)>;
+
+// TODO, rename to be more expressive !
+def : Pat<(i32 mvk_all_pred:$val),
+          (mvkh_immediate mvk_all_pred:$val,
+            (mvkl_immediate mvk_all_pred:$val))>;
+
+def : Pat<(i32 (Wrapper tglobaladdr:$val)),
+          (mvkh_immediate tglobaladdr:$val,
+            (mvkl_immediate tglobaladdr:$val))>;
+
+def : Pat<(i32 (Wrapper tjumptable:$dst)),
+          (mvkh_immediate tjumptable:$dst,
+            (mvkl_immediate tjumptable:$dst))>;
+
+def : Pat<(i32 (Wrapper texternalsym:$dst)),
+          (mvkh_immediate texternalsym:$dst,
+            (mvkl_immediate texternalsym:$dst))>;
 
 // NKim, instruction for emitting a returning pad for an indirectly called rou-
 // tine. I model this as a pseudo-instruction, since this correspond to a label.
@@ -346,8 +336,8 @@ def call_return_label : pseudoinst<(outs), (ins LabelOperand:$label),
 // for loading the upper and a lower part of the constant into a 32 bit TI-reg
 
 def : Pat<(call_label_operand_node texternalsym:$label),
-          (mvkh_return_label texternalsym:$label,
-          (mvkl_return_label texternalsym:$label))>;
+          (mvkh_label texternalsym:$label,
+            (mvkl_label texternalsym:$label))>;
 
 def : Pat<(call_return_label_node texternalsym:$label),
           (call_return_label texternalsym:$label)>;
@@ -427,42 +417,47 @@ def mvselect : nopred_inst<(outs GPRegs:$dst), (ins GPRegs:$reg, GPRegs:$src1),
 def : Pat<(tmsselect GPRegs:$false, GPRegs:$true, timm:$trueimm, predwrapper1:$truereg),
 	  (mvselect GPRegs:$true, GPRegs:$false, imm:$trueimm, predwrapper1:$truereg)>;
 
-def : Pat<(i32 mvk_all_pred:$val),
-	(mvkh_p mvk_all_pred:$val, (mvkl_p mvk_all_pred:$val))>;
+///////////////////////////////////////////////////////////////////////////////
+// BRANCH instructions                                                       //
+///////////////////////////////////////////////////////////////////////////////
 
-// Branch / call instructions
+// NOTE, we do not yet declare the unconditional branches as being a barrier
+// since there is a way of a branch being predicated, will check again later
 
-let isTerminator = 1,
-    isBranch = 1,
+let isBranch = 1,
+    isTerminator = 1,
     DelaySlots = 5,
     hasDelaySlot = 1 in
 {
-def branch_p : inst<(outs), (ins BranchTargetOperand:$block), "b\t.S1\t$block",
-                    [(br bb:$block)], 0, unit_s>
-{
-  let Pattern = sched_pattern;
-}
+  def branch : inst<(outs), (ins BranchTargetOperand:$block),
+                    "b\t$block", [(br bb:$block)], 0, unit_s>
+  {
+    let Pattern = sched_pattern;
+  }
 
-def branch_1 : inst<(outs), (ins BranchTargetOperand:$block), "b\t.S1\t$block",
-                                [(br bb:$block)], 0, unit_s>;
+  def branch_A : inst<(outs), (ins BranchTargetOperand:$block),
+                      "b\t.S1\t$block", [(br bb:$block)], 0, unit_s>;
 
-def branch_2 : inst<(outs), (ins BranchTargetOperand:$block), "b\t.S2\t$block",
-                                [(br bb:$block)], 1, unit_s>;
+  def branch_B : inst<(outs), (ins BranchTargetOperand:$block),
+                      "b\t.S2\t$block", [(br bb:$block)], 1, unit_s>;
 
-def brcond_p : nopred_inst<(outs),
-                           (ins BranchTargetOperand:$block), "b\t.S1\t$block",
-                           [(brcond_node bb:$block, timm:$a, predwrapper1:$b)],
-                           0, unit_s>
-{
-  let Pattern = sched_pattern;
-}
+  // conditional branches are being declared as non-predicated...
+  // i am not sure whether the codegen respects this properly...
+  def branch_cond : nopred_inst<(outs), (ins BranchTargetOperand:$block), 
+                      "b\t.S1\t$block",
+                       [(brcond_node bb:$block, timm:$a, predwrapper1:$b)],
+                       0, unit_s>
+  {
+    let Pattern = sched_pattern;
+  }
 
-def bindirect_2 : inst<(outs),
-                       (ins GPRegs:$reg), "bnop\t.S2X\t$reg,\t5",
-                       [(brind GPRegs:$reg)], 1, unit_s>
-{
-  let Pattern = sched_pattern;
-}
+  // indirect (register) branches
+  def branch_reg : inst<(outs), (ins GPRegs:$reg),
+                        "bnop\t.S2X\t$reg,\t5",
+                         [(brind GPRegs:$reg)], 1, unit_s>
+  {
+    let Pattern = sched_pattern;
+  }
 } // isBranch
 
 

@@ -1,4 +1,4 @@
-//===- TMS320C64XInstrInfo.cpp - TMS320C64X Instruction Information -------===//
+//===- TMS319C64XInstrInfo.cpp - TMS320C64X Instruction Information -------===//
 //
 // Copyright 2010 Jeremy Morse <jeremy.morse@gmail.com>. All rights reserved.
 //
@@ -123,6 +123,22 @@ TMS320C64XInstrInfo::CreateTargetHazardRecognizer(const TargetMachine *TM,
 
 //-----------------------------------------------------------------------------
 
+bool TMS320C64XInstrInfo::getImmPredValue(const MachineInstr &MI) const {
+
+  const int predIndex = MI.findFirstPredOperandIdx();
+
+  // no predicates found for the MI
+  if (predIndex == -1) return false;
+
+  // MI is predicated and the predicate (immediate) is valid,
+  // NOTE, we are not able to handle non-immediate predicates
+  if (MI.getOperand(predIndex).getImm() != -1) return true;
+
+  return false;
+}
+
+//-----------------------------------------------------------------------------
+
 void TMS320C64XInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                       MachineBasicBlock::iterator I,
                                       DebugLoc DL,
@@ -133,6 +149,9 @@ void TMS320C64XInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   const bool destGPR = TMS320C64X::GPRegsRegClass.contains(DestReg);
   const bool srcGPR = TMS320C64X::GPRegsRegClass.contains(SrcReg);
 
+  // we do not yet restrict register-moves between different sides
+  // and therefore allow moves between arbitrary gen-purpose regs
+
   if (destGPR && srcGPR) {
     MachineInstrBuilder MIB =
       BuildMI(MBB, I, DL, get(TMS320C64X::mv), DestReg);
@@ -142,27 +161,6 @@ void TMS320C64XInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
 
-/*
-  const bool destAReg = TMS320C64X::ARegsRegClass.contains(DestReg);
-  const bool srcAReg = TMS320C64X::ARegsRegClass.contains(SrcReg);
-  const bool destBReg = TMS320C64X::BRegsRegClass.contains(DestReg);
-  const bool srcBReg = TMS320C64X::BRegsRegClass.contains(SrcReg);
-
-  // both regs belong to the A-reg-file, therefore we can simply copy
-  // the content of the source reg by moving it into the destination,
-  // the same principle applies to the B-register file
-  if ((destAReg && srcAReg) || (destBReg && srcBReg)) {
-    MachineInstrBuilder MIB =
-      BuildMI(MBB, I, DL, get(TMS320C64X::mv), DestReg);
-
-    MIB.addReg(SrcReg, getKillRegState(KillSrc));
-    addDefaultPred(MIB);
-    return;
-  }
-*/
-
-  // we do not deal with the constraints of the cross-path-copies,
-  // for now we simply let this up to the scheduler completely
   llvm_unreachable("Can not copy physical registers!");
 }
 
@@ -264,92 +262,121 @@ TMS320C64XInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 		                   SmallVectorImpl<MachineOperand> &Cond,
                                    bool AllowModify) const
 {
-	bool predicated, saw_uncond_branch;
-	int pred_idx, opcode;
-	MachineBasicBlock::iterator I = MBB.end();
+  // empty machine basic block, nothing to do
+  if (MBB.begin() == MBB.end()) return false;
 
-	saw_uncond_branch = false;
+  MachineBasicBlock::iterator I = MBB.end();
 
-	while (I != MBB.begin()) {
-		--I;
+  // if the machine basic block contains only debug
+  // values, there are obviously nothing to analyze
+  while((--I)->isDebugValue())
+    if (I == MBB.begin()) return false;
 
-		pred_idx = I->findFirstPredOperandIdx();
-		if (pred_idx == -1) {
-			predicated = false;
-		} else if (I->getOperand(pred_idx).getImm() != -1) {
-			predicated = true;
-		} else {
-			predicated = false;
-		}
+  MachineInstr *LastInstr = I;
 
-		opcode = I->getOpcode();
+  // the machine basic block falls through (no branches)
+  if (!(LastInstr->getDesc().isBranch())) return false;
 
-		if (!predicated && (opcode == TMS320C64X::branch_p ||
-					opcode == TMS320C64X::branch_1 ||
-					opcode == TMS320C64X::branch_2)) {
-			// We're an unconditional branch. The analysis rules
-			// say that we should carry on looking, in case there's
-			// a conditional branch beforehand.
+  /// here we can be sure to be dealing with a regular branch-instruction.
+  /// NOTE, we do not consider a return to be a branch ! Now to be able to
+  /// analyze the branch properly, we additionally need to check whether
+  /// the branch is conditional/predicated
 
-			saw_uncond_branch = true;
-			TBB = I->getOperand(0).getMBB();
+  const int lastOpcode = LastInstr->getOpcode();
+  const bool lastIsCond = lastOpcode == TMS320C64X::branch_cond;
 
-			if (!AllowModify)
-				// Nothing to be done
-				continue;
+  // there is only one branch instruction in the basic block
+  if (I == MBB.begin() || !isUnpredicatedTerminator(--I)) {
 
-			// According to what X86 does, we can delete branches
-			// if they branch to the immediately following BB
+    if (!lastIsCond) {
 
-			if (MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
-				TBB = NULL;
-				// FIXME - and what about trailing noops?
-				I->eraseFromParent();
-				I = MBB.end();
-				continue;
-			}
+      // the destination is not available for indirect register branches,
+      // therefore we can not handle them and skip the branch analysis
+      if (lastOpcode == TMS320C64X::branch_reg) return true;
 
-			continue;
-		}
+      FBB = 0; TBB = LastInstr->getOperand(0).getMBB();
 
-		// If we're a predicated instruction and terminate the BB,
-		// we can be pretty sure we're a conditional branch
-		if (predicated && (opcode == TMS320C64X::brcond_p)) {
-			// Two different conditions to consider - this is the
-			// only branch, in which case we fall through to the
-			// next, or it's a conditional before unconditional.
+      // here we seem to be dealing with an unconditional branch. If the
+      // destination block is the layout-follower, we can remove the branch
+      // since we are actually falling through
+      if (MBB.isLayoutSuccessor(TBB) && AllowModify) {
+        LastInstr->eraseFromParent();
+        TBB = 0;
+      }
+    }
+    else {
 
-			if (TBB != NULL) {
-				// False: the trailing unconditional branch
-				// True: the conditional branch if taken
-				FBB = TBB;
-				TBB = I->getOperand(0).getMBB();
-			} else {
-				TBB = I->getOperand(0).getMBB();
-			}
+      // if the last branch instruction is a conditional branch, we have
+      // to specify the outcomes of the branch and specify the condition.
+      // The branch folder will then do the rest for us. Note, we do not
+      // have a predication for a conditional branch, which would lead to
+      // a situation of having a conditional conditional branch...
 
-			// Store the conditions of the conditional jump
-			Cond.push_back(I->getOperand(1)); // Zero/NZ
-			Cond.push_back(I->getOperand(2)); // Reg
+      if (TBB) FBB = TBB;
+      TBB = LastInstr->getOperand(0).getMBB();
 
-			return false;
-		}
+      // store the conditions of the conditional jump
+      Cond.push_back(LastInstr->getOperand(1));  // Zero/NZ
+      Cond.push_back(LastInstr->getOperand(2));  // Reg
+    }
+    return false;
+  }
 
-		// Out of branches and conditional branches, only other thing
-		// we expect to see is a trailing noop
+  MachineInstr *SecLastInstr = I;
 
-		if (opcode == TMS320C64X::noop)
-			continue;
+  // if there are 3 terminators, we don't know what sort of bb this is
+  if (SecLastInstr && I != MBB.begin() && isUnpredicatedTerminator(--I))
+    return true;
 
-		if (saw_uncond_branch)
-			// We already saw an unconditional branch, then
-			// something we didn't quite understand
-			return false;
+  const int secLastOpcode = SecLastInstr->getOpcode();
+  const bool secLastIsCond = secLastOpcode == TMS320C64X::branch_cond;
 
-		return true; // Something we don't understand at all
-	}
+  if (!secLastIsCond) {
 
-	return true;
+    // for now we can not handle indirect register branches
+    if (secLastOpcode == TMS320C64X::branch_reg) return true;
+
+    /// guarded by the immediate predicate which tells us the branch will be
+    /// executed, in this case we can drop the very last instruction, since
+    /// it is actually dead. Also, if the second last instruction branches to
+    /// a follow block we can remove it as well, even if such a scenario is
+    /// rare and actually shouldnt happen for a regular code
+
+    assert(getImmPredValue(*SecLastInstr) && "Bad branch predicate (2)!");
+
+    // all following instructions(branches) are obviously dead,
+    // since we know that the preceeding branch will be executed
+    if (AllowModify) LastInstr->eraseFromParent();
+
+    FBB = 0; TBB = TBB = SecLastInstr->getOperand(0).getMBB();
+
+    // if the destination is the same as the fall-through block, we can
+    // drop the second last branch (now actually being the last) as well,
+    // since we are now falling through to the layout successor
+    if (MBB.isLayoutSuccessor(TBB) && AllowModify) {
+      SecLastInstr->eraseFromParent();
+      TBB = 0;
+    }
+    return false;
+  }
+  else {
+
+    assert(LastInstr && "Can not analyze conditional branch!");
+
+    // set the outcomes of the conditional branch. We do not overcomplicate
+    // things such as checking whether we are jumping to the layout follower,
+    // let the branch-folder do the rest for us if necessary
+    TBB = SecLastInstr->getOperand(0).getMBB();
+    FBB = LastInstr->getOperand(0).getMBB();
+
+    // Store the conditions of the conditional jump
+    Cond.push_back(SecLastInstr->getOperand(1));  // Zero/NZ
+    Cond.push_back(SecLastInstr->getOperand(2));  // Reg
+    return false;
+  }
+ 
+  // can't analyze 
+  return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -365,43 +392,57 @@ TMS320C64XInstrInfo::InsertBranch(MachineBasicBlock &MBB,
   assert((Cond.size() == 2 || Cond.size() == 0)
     && "Invalid condition to InsertBranch");
 
+  unsigned numInsertedBranches = 0;
+
   if (Cond.empty()) {
-    // Unconditional branch
+
+    // We are dealing with an unconditional branch. The branch-analyzer must
+    // not supply the false-cond outcome, since there is no condition at all
     assert(!FBB && "Unconditional branch with multiple successors");
-    addDefaultPred(BuildMI(&MBB, DL, get(TMS320C64X::branch_p)).addMBB(TBB));
+    addDefaultPred(BuildMI(&MBB, DL, get(TMS320C64X::branch)).addMBB(TBB));
+    numInsertedBranches = 1;
   }
   else {
-    // Insert conditional branch with operands sent to us by analyze branch
-    BuildMI(&MBB, DL, get(TMS320C64X::brcond_p)).addMBB(TBB)
+    // Insert conditional branch with operands sent to us by analyze branch,
+    // deal here with the true-cond successor
+    BuildMI(&MBB, DL, get(TMS320C64X::branch_cond)).addMBB(TBB)
       .addImm(Cond[0].getImm()).addReg(Cond[1].getReg());
 
-    if (FBB)
-      addDefaultPred(BuildMI(&MBB, DL, get(TMS320C64X::brcond_p)).addMBB(FBB));
+    numInsertedBranches = 1;
+
+    if (FBB) {
+      // when dealing with conditional branches without fallthroughs (branch
+      // analyzer result), also do a branch insertion to the false-successor
+      addDefaultPred(BuildMI(&MBB,
+        DL, get(TMS320C64X::branch_cond)).addMBB(FBB));
+
+      numInsertedBranches++;
+    }
   }
-  return 1;
+
+  return numInsertedBranches;
 }
 
 //-----------------------------------------------------------------------------
 
-unsigned
-TMS320C64XInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
+unsigned TMS320C64XInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
 
   MachineBasicBlock::iterator I = MBB.end();
 
   unsigned count = 0;
 
-
   while (I != MBB.begin()) {
     --I;
 
-    if (I->getOpcode() != TMS320C64X::branch_p &&
-        I->getOpcode() != TMS320C64X::branch_1 &&
-        I->getOpcode() != TMS320C64X::branch_2 &&
-        I->getOpcode() != TMS320C64X::brcond_p &&
-        I->getOpcode() != TMS320C64X::noop)
-        break;
+    const int opcode = I->getOpcode();
 
-    // Remove branch
+    // skip/ignore any nops (trailing or in between)
+    if (opcode == TMS320C64X::noop) continue;
+
+    // We can only consider branch-instruction with known destination, this
+    // excludes any non-branch instructions as well a indirect reg branches
+    if (!I->getDesc().isBranch() || opcode == TMS320C64X::branch_reg) break;
+
     I->eraseFromParent();
     I = MBB.end();
     ++count;
@@ -704,6 +745,8 @@ void
 TMS320C64XInstrInfo::dumpFlags(const MachineInstr *MI, raw_ostream &os) {
   dumpFlags(MI->getDesc(), os);
 }
+
+//-----------------------------------------------------------------------------
 
 void
 TMS320C64XInstrInfo::dumpFlags(const TargetInstrDesc &Desc, raw_ostream &os) {

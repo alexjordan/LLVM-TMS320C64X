@@ -185,6 +185,8 @@ public:
     // implementation bodies in order to avoid header-confusions and building
     // problems
 
+    bool getImmPredValue(const MachineInstr &MI) const;
+
     static
     const MachineInstrBuilder &addDefaultPred(const MachineInstrBuilder &MIB);
 

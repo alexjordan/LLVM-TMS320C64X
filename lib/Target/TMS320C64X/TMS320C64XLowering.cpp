@@ -658,8 +658,6 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
     assert(Chain.getValue(0).getNode() && Chain.getValue(1).getNode() &&
       "Bad chain values detected for the indirect call DAG node!");
 
-    // allow more scheduler freedom
-    // ops[0] = Chain.getValue(0);
     ops.push_back(Chain.getValue(1));
     Chain = DAG.getNode(TMSISD::CALL, dl, OperandTys, &ops[0], ops.size());
 
@@ -671,8 +669,7 @@ SDValue TMS320C64XLowering::LowerCall(SDValue Chain,
       Chain.getValue(1));
   }
   else {
-    // now insert a regular call node for the non-register calls, which is
-    // actually for sure by far the majority of all call-instructions
+    // now insert a regular call node for the non-register calls
     Chain = DAG.getNode(TMSISD::CALL, dl, OperandTys, &ops[0], ops.size());
   }
 
