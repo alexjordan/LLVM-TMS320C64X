@@ -34,12 +34,12 @@
 #include "TMS320C64XHazardRecognizer.h"
 #include "TMS320C64XSubtarget.h"
 
-#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/VLIWTargetMachine.h"
 #include "llvm/Target/TargetData.h"
 
 namespace llvm {
 
-class TMS320C64XTargetMachine : public LLVMTargetMachine {
+class TMS320C64XTargetMachine : public VLIWTargetMachine {
 
     const TargetData		DataLayout;
     TMS320C64XInstrInfo		InstrInfo;

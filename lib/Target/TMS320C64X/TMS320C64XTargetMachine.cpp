@@ -45,7 +45,7 @@ extern "C" void LLVMInitializeTMS320C64XTarget() {
 TMS320C64XTargetMachine::TMS320C64XTargetMachine(const Target &T,
                                                  const std::string &TT,
 						 const std::string &FS)
-: LLVMTargetMachine(T, TT),
+: VLIWTargetMachine(T, TT),
   DataLayout("e-p:32:32:32-i8:8:8-i16:16:16-i32:32:32-f32:32:32-f64:64:64-n32"),
 
   // No float types - could define n40, in that the DSP supports 40 bit
@@ -77,10 +77,8 @@ bool TMS320C64XTargetMachine::addInstSelector(PassManagerBase &PM,
 bool TMS320C64XTargetMachine::addPostRAScheduler(PassManagerBase &PM,
                                                 CodeGenOpt::Level OptLevel)
 {
-#ifdef POST_RA_SCHED
   if (Subtarget.enablePostRAScheduler())
     PM.add(createTMS320C64XScheduler(*this));
-#endif
   return false;
 }
 

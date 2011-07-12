@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Declares and implements the machine function info for the TMS320C64X.
+// Declares the machine function info for the TMS320C64X.
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,20 +16,21 @@
 #define LLVM_TARGET_TMS320C64X_MACHINEFUNCTIONINFO_H
 
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/ADT/DenseMap.h"
 
 namespace llvm {
 
 class TMS320C64XMachineFunctionInfo : public MachineFunctionInfo {
-  unsigned ScheduledCycles;
+  DenseMap<const MachineBasicBlock*, unsigned> ScheduledCycles;
 
 public:
-  TMS320C64XMachineFunctionInfo() : ScheduledCycles(0) {}
+  TMS320C64XMachineFunctionInfo() {}
 
-  explicit TMS320C64XMachineFunctionInfo(MachineFunction &MF)
-    : ScheduledCycles(0) {}
+  explicit TMS320C64XMachineFunctionInfo(MachineFunction &MF) {}
 
-  unsigned getScheduledCycles() const { return ScheduledCycles; }
-  void setScheduledCycles(unsigned c) { ScheduledCycles = c; }
+  unsigned getScheduledCycles(const MachineBasicBlock *BB) const;
+  bool hasScheduledCycles(const MachineBasicBlock *BB) const;
+  void setScheduledCycles(const MachineBasicBlock *BB, unsigned c);
 };
 
 } // End llvm namespace

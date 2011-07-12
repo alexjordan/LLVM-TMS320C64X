@@ -111,14 +111,22 @@ TMS320C64XInstrInfo::CreateTargetHazardRecognizer(const TargetMachine *TM,
   const TargetInstrInfo *TII = TM->getInstrInfo();
   assert(TII && "No InstrInfo? Can not create a hazard recognizer!");
 
-  // Only use hazard recognizer with post-RA scheduling setup
-  if (TM->getSubtarget<TMS320C64XSubtarget>().enablePostRAScheduler()) {
-    assert(false && "not yet implemented/tested");
-    return new TMS320C64XHazardRecognizer(*TII);
-  }
+  // XXX hazard recognizer only works for post RA scheduler right now
+  // return new TMS320C64XHazardRecognizer(*TII);
 
   // Otherwise use LLVM default
   return TargetInstrInfoImpl::CreateTargetHazardRecognizer(TM, DAG);
+}
+
+//-----------------------------------------------------------------------------
+
+ScheduleHazardRecognizer*
+TMS320C64XInstrInfo::CreatePostRAHazardRecognizer(const TargetMachine *TM)
+{
+  const TargetInstrInfo *TII = TM->getInstrInfo();
+  assert(TII && "No InstrInfo? Can not create a hazard recognizer!");
+
+  return new TMS320C64XHazardRecognizer(*TII);
 }
 
 //-----------------------------------------------------------------------------

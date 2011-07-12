@@ -1,4 +1,4 @@
-//===-- LLVMTargetMachine.cpp - Implement the LLVMTargetMachine class -----===//
+//===-- VLIWTargetMachine.cpp - Implement the VLIWTargetMachine class -----===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,11 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements the LLVMTargetMachine class.
+// This file implements a target machine for VLIW processors.
+//
+// Some optimization for compile time were left out and post RA scheduling is
+// handled differently.
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/VLIWTargetMachine.h"
 #include "llvm/PassManager.h"
 #include "llvm/Analysis/Verifier.h"
 #include "llvm/Assembly/PrintModulePass.h"
@@ -35,52 +38,26 @@
 #include "llvm/Support/StandardPasses.h"
 using namespace llvm;
 
-namespace llvm {
-  bool EnableFastISel;
-}
-
-cl::opt<bool> DisablePostRA("disable-post-ra", cl::Hidden,
-    cl::desc("Disable Post Regalloc"));
-cl::opt<bool> DisableBranchFold("disable-branch-fold", cl::Hidden,
-    cl::desc("Disable branch folding"));
-cl::opt<bool> DisableTailDuplicate("disable-tail-duplicate", cl::Hidden,
-    cl::desc("Disable tail duplication"));
-cl::opt<bool> DisableEarlyTailDup("disable-early-taildup", cl::Hidden,
-    cl::desc("Disable pre-register allocation tail duplication"));
-cl::opt<bool> DisableCodePlace("disable-code-place", cl::Hidden,
-    cl::desc("Disable code placement"));
-cl::opt<bool> DisableSSC("disable-ssc", cl::Hidden,
-    cl::desc("Disable Stack Slot Coloring"));
-cl::opt<bool> DisableMachineLICM("disable-machine-licm", cl::Hidden,
-    cl::desc("Disable Machine LICM"));
-cl::opt<bool> DisablePostRAMachineLICM("disable-postra-machine-licm",
-    cl::Hidden,
-    cl::desc("Disable Machine LICM"));
-cl::opt<bool> DisableMachineSink("disable-machine-sink", cl::Hidden,
-    cl::desc("Disable Machine Sinking"));
-cl::opt<bool> DisableLSR("disable-lsr", cl::Hidden,
-    cl::desc("Disable Loop Strength Reduction Pass"));
-cl::opt<bool> DisableCGP("disable-cgp", cl::Hidden,
-    cl::desc("Disable Codegen Prepare"));
-cl::opt<bool> PrintLSR("print-lsr-output", cl::Hidden,
-    cl::desc("Print LLVM IR produced by the loop-reduce pass"));
-cl::opt<bool> PrintISelInput("print-isel-input", cl::Hidden,
-    cl::desc("Print LLVM IR input to isel pass"));
-cl::opt<bool> PrintGCInfo("print-gc", cl::Hidden,
-    cl::desc("Dump garbage collector data"));
-cl::opt<bool> ShowMCEncoding("show-mc-encoding", cl::Hidden,
-    cl::desc("Show encoding in .s output"));
-cl::opt<bool> ShowMCInst("show-mc-inst", cl::Hidden,
-    cl::desc("Show instruction structure in .s output"));
-cl::opt<bool> EnableMCLogging("enable-mc-api-logging", cl::Hidden,
-    cl::desc("Enable MC API logging"));
-cl::opt<bool> VerifyMachineCode("verify-machineinstrs", cl::Hidden,
-    cl::desc("Verify generated machine code"),
-    cl::init(getenv("LLVM_VERIFY_MACHINEINSTRS")!=NULL));
-
-cl::opt<cl::boolOrDefault>
-AsmVerbose("asm-verbose", cl::desc("Add comments to directives."),
-           cl::init(cl::BOU_UNSET));
+// subset of options defined by LLVMTargetMachine
+extern cl::opt<bool> DisablePostRA;
+extern cl::opt<bool> DisableBranchFold;
+extern cl::opt<bool> DisableTailDuplicate;
+extern cl::opt<bool> DisableEarlyTailDup;
+extern cl::opt<bool> DisableCodePlace;
+extern cl::opt<bool> DisableSSC;
+extern cl::opt<bool> DisableMachineLICM;
+extern cl::opt<bool> DisablePostRAMachineLICM;
+extern cl::opt<bool> DisableMachineSink;
+extern cl::opt<bool> DisableLSR;
+extern cl::opt<bool> DisableCGP;
+extern cl::opt<bool> PrintLSR;
+extern cl::opt<bool> PrintISelInput;
+extern cl::opt<bool> PrintGCInfo;
+extern cl::opt<bool> ShowMCEncoding;
+extern cl::opt<bool> ShowMCInst;
+extern cl::opt<bool> EnableMCLogging;
+extern cl::opt<bool> VerifyMachineCode;
+extern cl::opt<cl::boolOrDefault> AsmVerbose;
 
 static bool getVerboseAsm() {
   switch (AsmVerbose) {
@@ -91,14 +68,7 @@ static bool getVerboseAsm() {
   }
 }
 
-// Enable or disable FastISel. Both options are needed, because
-// FastISel is enabled by default with -fast, and we wish to be
-// able to enable or disable fast-isel independently from -O0.
-static cl::opt<cl::boolOrDefault>
-EnableFastISelOption("fast-isel", cl::Hidden,
-  cl::desc("Enable the \"fast\" instruction selector"));
-
-LLVMTargetMachine::LLVMTargetMachine(const Target &T,
+VLIWTargetMachine::VLIWTargetMachine(const Target &T,
                                      const std::string &Triple)
   : TargetMachine(T), TargetTriple(Triple) {
   AsmInfo = T.createAsmInfo(TargetTriple);
@@ -106,16 +76,16 @@ LLVMTargetMachine::LLVMTargetMachine(const Target &T,
 
 // Set the default code model for the JIT for a generic target.
 // FIXME: Is small right here? or .is64Bit() ? Large : Small?
-void LLVMTargetMachine::setCodeModelForJIT() {
+void VLIWTargetMachine::setCodeModelForJIT() {
   setCodeModel(CodeModel::Small);
 }
 
 // Set the default code model for static compilation for a generic target.
-void LLVMTargetMachine::setCodeModelForStatic() {
+void VLIWTargetMachine::setCodeModelForStatic() {
   setCodeModel(CodeModel::Small);
 }
 
-bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
+bool VLIWTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
                                             formatted_raw_ostream &Out,
                                             CodeGenFileType FileType,
                                             CodeGenOpt::Level OptLevel,
@@ -199,7 +169,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
 /// of functions.  This method should returns true if machine code emission is
 /// not supported.
 ///
-bool LLVMTargetMachine::addPassesToEmitMachineCode(PassManagerBase &PM,
+bool VLIWTargetMachine::addPassesToEmitMachineCode(PassManagerBase &PM,
                                                    JITCodeEmitter &JCE,
                                                    CodeGenOpt::Level OptLevel,
                                                    bool DisableVerify) {
@@ -222,7 +192,7 @@ bool LLVMTargetMachine::addPassesToEmitMachineCode(PassManagerBase &PM,
 /// code is not supported. It fills the MCContext Ctx pointer which can be
 /// used to build custom MCStreamer.
 ///
-bool LLVMTargetMachine::addPassesToEmitMC(PassManagerBase &PM,
+bool VLIWTargetMachine::addPassesToEmitMC(PassManagerBase &PM,
                                           MCContext *&Ctx,
                                           CodeGenOpt::Level OptLevel,
                                           bool DisableVerify) {
@@ -252,7 +222,7 @@ static void printAndVerify(PassManagerBase &PM,
 /// addCommonCodeGenPasses - Add standard LLVM codegen passes used for both
 /// emitting to assembly files or machine code output.
 ///
-bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
+bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
                                                CodeGenOpt::Level OptLevel,
                                                bool DisableVerify,
                                                MCContext *&OutContext) {
@@ -331,11 +301,6 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
 
   // Set up a MachineFunction for the rest of CodeGen to work on.
   PM.add(new MachineFunctionAnalysis(*this, OptLevel));
-
-  // Enable FastISel with -fast, but allow that to be overridden.
-  if (EnableFastISelOption == cl::BOU_TRUE ||
-      (OptLevel == CodeGenOpt::None && EnableFastISelOption != cl::BOU_FALSE))
-    EnableFastISel = true;
 
   // Ask the target for an isel.
   if (addInstSelector(PM, OptLevel))
@@ -418,11 +383,10 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   if (addPreSched2(PM, OptLevel))
     printAndVerify(PM, "After PreSched2 passes");
 
-  // Second pass scheduler.
-  if (OptLevel != CodeGenOpt::None && !DisablePostRA) {
-    PM.add(createPostRAScheduler(OptLevel));
-    printAndVerify(PM, "After PostRAScheduler");
-  }
+  // Second pass scheduler (required from the target).
+  if (addPostRAScheduler(PM, OptLevel))
+    return true;
+  printAndVerify(PM, "After PostRAScheduler");
 
   // Branch folding must be run after regalloc and prolog/epilog insertion.
   if (OptLevel != CodeGenOpt::None && !DisableBranchFold) {

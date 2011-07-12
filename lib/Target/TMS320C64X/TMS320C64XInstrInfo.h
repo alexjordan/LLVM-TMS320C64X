@@ -49,7 +49,8 @@ enum {
   mem_align_amt_mask = 0x600,
   mem_align_amt_shift = 9,
   fixed_unit_mask = 0x3000,
-  fixed_unit_shift = 12
+  fixed_unit_shift = 12,
+  is_side_inst = 0x4000
 };
 
 // unit support value that signifies: instruction is fixed
@@ -104,10 +105,14 @@ public:
       return RI;
     }
 
-    // NKIM, create a hazard recognizer for the TI target
+    // creates a generic hazard recognizer
     ScheduleHazardRecognizer*
     CreateTargetHazardRecognizer(const TargetMachine *TM,
                                  const ScheduleDAG *DAG) const;
+
+    // AJO hook used by the custom post RA scheduler
+    static ScheduleHazardRecognizer*
+    CreatePostRAHazardRecognizer(const TargetMachine *TM);
 
     virtual void copyPhysReg(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator I,

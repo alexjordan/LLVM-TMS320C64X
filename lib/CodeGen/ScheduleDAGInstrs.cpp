@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "sched-instrs"
-#include "ScheduleDAGInstrs.h"
+#include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/Operator.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -37,6 +37,15 @@ ScheduleDAGInstrs::ScheduleDAGInstrs(MachineFunction &mf,
     InstrItins(mf.getTarget().getInstrItineraryData()),
     Defs(TRI->getNumRegs()), Uses(TRI->getNumRegs()), LoopRegs(MLI, MDT) {
   DbgValueVec.clear();
+
+  // AJO create a special SUnit to signal a bundle end in the sequence
+  // (NULL SUnit is already used to signal Noop)
+  BundleEndSU = new SUnit();
+}
+
+ScheduleDAGInstrs::~ScheduleDAGInstrs() {
+  delete BundleEndSU;
+  BundleEndSU = 0;
 }
 
 /// Run - perform scheduling.
@@ -235,7 +244,8 @@ void ScheduleDAGInstrs::BuildSchedGraph(AliasAnalysis *AA) {
       continue;
     }
     const TargetInstrDesc &TID = MI->getDesc();
-    assert(!TID.isTerminator() && !MI->isLabel() &&
+    // AJO for TI post pass scheduling, we do schedule terminators
+    assert(!MI->isLabel() &&
            "Cannot schedule terminators or labels!");
     // Create the SUnit for this MI.
     SUnit *SU = NewSUnit(MI);
@@ -670,6 +680,10 @@ MachineBasicBlock *ScheduleDAGInstrs::EmitSchedule() {
       // Null SUnit* is a noop.
       EmitNoop();
       continue;
+    } else if (SU == BundleEndSU) {
+      // special SUnit to signal bundle end
+      EmitBundleEnd();
+      continue;
     }
 
     BB->insert(InsertPos, SU->getInstr());
@@ -690,4 +704,12 @@ MachineBasicBlock *ScheduleDAGInstrs::EmitSchedule() {
 
   DbgValueVec.clear();
   return BB;
+}
+
+unsigned ScheduleDAGInstrs::countNoops(const std::vector<SUnit*> &Sequence) const {
+  unsigned Noops = 0;
+  for (unsigned i = 0, e = Sequence.size(); i != e; ++i)
+    if (!Sequence[i] || !Sequence[i]->getInstr())
+      ++Noops;
+  return Noops;
 }

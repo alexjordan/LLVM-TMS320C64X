@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "post-RA-sched"
-#define DBGMI(MI) errs() << MI->getDesc().getName() << ": "
+#define DBGMI(MI) dbgs() << MI->getDesc().getName() << ": "
 
 #include "TMS320C64X.h"
 #include "TMS320C64XHazardRecognizer.h"
@@ -189,11 +189,10 @@ unsigned TMS320C64XHazardRecognizer::getUnitIndex(unsigned side, unsigned unit)
 unsigned TMS320C64XHazardRecognizer::getUnitIndex(SUnit *SU) {
   const MachineInstr *MI = SU->getInstr();
 	const TargetInstrDesc desc = MI->getDesc();
-  unsigned unit_support = desc.TSFlags & TMS320C64XII::unit_support_mask;
 
   unsigned side = IS_BSIDE(desc.TSFlags) ? 1 : 0;
 
-  if (unit_support == UNIT_FIXED) {
+  if (!isFlexibleInstruction(desc)) {
     // the unit is hardcoded in the flags
     unsigned unit = GET_UNIT(desc.TSFlags);
     return getUnitIndex(side, unit);
@@ -241,9 +240,7 @@ unsigned TMS320C64XHazardRecognizer::getExtraUse(SUnit *SU) {
   const MachineInstr *MI = SU->getInstr();
   const TargetInstrDesc desc = MI->getDesc();
 
-  unsigned unit_support = desc.TSFlags & TMS320C64XII::unit_support_mask;
-
-  if (unit_support == UNIT_FIXED) {
+  if (!isFlexibleInstruction(desc)) {
     assert((desc.TSFlags & TMS320C64XII::is_memaccess) == 0);
 
     // not all instructions play nice
@@ -289,6 +286,17 @@ bool TMS320C64XHazardRecognizer::isPseudo(SUnit *SU) const {
 
 //-----------------------------------------------------------------------------
 
+bool
+TMS320C64XHazardRecognizer::isFlexibleInstruction( const TargetInstrDesc &tid) {
+  if ((tid.TSFlags & TMS320C64XII::unit_support_mask) != UNIT_FIXED &&
+      (tid.TSFlags & TMS320C64XII::is_side_inst))
+    return true;
+  else
+    return false;
+}
+
+//-----------------------------------------------------------------------------
+
 bool TMS320C64XHazardRecognizer::isMove(SUnit *SU) const {
   return (SU->getInstr()->getOpcode() == TMS320C64X::mv);
 }
@@ -301,9 +309,10 @@ void TMS320C64XHazardRecognizer::fixResources(SUnit *SU) {
 	const TargetInstrDesc desc = MI->getDesc();
   int regside, instside;
 
-  // nothing to do for fixed units
-  if ((desc.TSFlags & TMS320C64XII::unit_support_mask) == UNIT_FIXED)
+  // nothing for fixed units
+  if (!isFlexibleInstruction(desc))
     return;
+
 
   // memory operations
   if (desc.TSFlags & TMS320C64XII::is_memaccess) {
@@ -356,7 +365,7 @@ void TMS320C64XHazardRecognizer::setXPath(MachineInstr *MI, bool set) const {
 
   const TargetInstrDesc desc = MI->getDesc();
 
-  if ((desc.TSFlags & TMS320C64XII::unit_support_mask) == UNIT_FIXED) {
+  if (!isFlexibleInstruction(desc)) {
     DBGMI(MI) << "cannot set XPATH, fixed instruction\n";
     return;
   }

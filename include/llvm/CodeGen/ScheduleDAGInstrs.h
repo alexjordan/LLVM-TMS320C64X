@@ -32,7 +32,7 @@ namespace llvm {
   /// For example, loop induction variable increments should be
   /// scheduled as soon as possible after the variable's last use.
   ///
-  class LLVM_LIBRARY_VISIBILITY LoopDependencies {
+  class LoopDependencies {
     const MachineLoopInfo &MLI;
     const MachineDominatorTree &MDT;
 
@@ -97,7 +97,7 @@ namespace llvm {
 
   /// ScheduleDAGInstrs - A ScheduleDAG subclass for scheduling lists of
   /// MachineInstrs.
-  class LLVM_LIBRARY_VISIBILITY ScheduleDAGInstrs : public ScheduleDAG {
+  class ScheduleDAGInstrs : public ScheduleDAG {
     const MachineLoopInfo &MLI;
     const MachineDominatorTree &MDT;
     const MachineFrameInfo *MFI;
@@ -128,6 +128,10 @@ namespace llvm {
     ///
     SmallSet<unsigned, 8> LoopLiveInRegs;
 
+    /// BundleEndSU - special SUnit to signal a bundle end in the sequence
+    ///
+    SUnit *BundleEndSU;
+
   public:
     MachineBasicBlock::iterator Begin;    // The beginning of the range to
                                           // be scheduled. The range extends
@@ -138,7 +142,7 @@ namespace llvm {
                                const MachineLoopInfo &mli,
                                const MachineDominatorTree &mdt);
 
-    virtual ~ScheduleDAGInstrs() {}
+    virtual ~ScheduleDAGInstrs();
 
     /// NewSUnit - Creates a new SUnit and return a ptr to it.
     ///
@@ -152,6 +156,8 @@ namespace llvm {
       SUnits.back().OrigNode = &SUnits.back();
       return &SUnits.back();
     }
+
+    SUnit *getBundleEndSUnit() const { return BundleEndSU; }
 
     /// Run - perform scheduling.
     ///
@@ -201,6 +207,11 @@ namespace llvm {
     virtual void dumpNode(const SUnit *SU) const;
 
     virtual std::string getGraphNodeLabel(const SUnit *SU) const;
+
+#ifndef NDEBUG
+    virtual unsigned countNoops(const std::vector<SUnit*> &Sequence) const;
+#endif
+
   };
 }
 

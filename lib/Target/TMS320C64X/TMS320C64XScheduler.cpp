@@ -12,16 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifdef POST_RA_SCHED
 #define DEBUG_TYPE "post-RA-sched"
 
 #include "TMS320C64X.h"
 #include "TMS320C64XMachineFunctionInfo.h"
 #include "TMS320C64XInstrInfo.h"
-
-// NKIM, separated into a h and a cpp-file
-#include "llvm/CodeGen/PostRASchedulerList.h"
-
+#include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/SchedulePostRABase.h"
 #include "llvm/PassManager.h"
 #include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -74,11 +71,19 @@ class TMS320C64XScheduler : public MachineFunctionPass {
 
 char TMS320C64XScheduler::ID = 0;
 
-//-----------------------------------------------------------------------------
+  class CustomListScheduler : public SchedulePostRABase {
 
-class CustomListScheduler : public SchedulePostRATDList {
+    /// HazardRec - The hazard recognizer to use.
+    ScheduleHazardRecognizer *HazardRec;
 
-    void ListScheduleBottomUp();
+    /// AvailableQueue - The priority queue to use for the available SUnits.
+    LatencyPriorityQueue AvailableQueue;
+
+    /// PendingQueue - Instructions which successors have been scheduled, but
+    /// are not ready because of their latency.
+    std::vector<SUnit*> PendingQueue;
+
+    unsigned NumCycles;
 
     void ReleasePred(SUnit *SU, const SDep *PredEdge);
 
@@ -88,19 +93,18 @@ class CustomListScheduler : public SchedulePostRATDList {
 
     bool DelayForLiveRegsBottomUp(SUnit *SU,
                                   SmallVector<unsigned, 4> &LRegs);
-
+    void ListScheduleBottomUp();
   public:
 
     CustomListScheduler(MachineFunction &MF,
-                        MachineLoopInfo &MLI,
-                        MachineDominatorTree &MDT,
-                        AliasAnalysis *AA,
-                        TargetSubtarget::AntiDepBreakMode AntiDepMode,
-                        SmallVectorImpl<TargetRegisterClass*> &CritPathRCs);
+                        const MachineLoopInfo &MLI,
+                        const MachineDominatorTree &MDT,
+                        ScheduleHazardRecognizer *HR,
+                        AliasAnalysis *AA);
 
     virtual void BuildSchedGraph(AliasAnalysis *AA);
     virtual void Schedule();
-    virtual unsigned getCycles() const { return 0; }
+    virtual unsigned getCycles() const { return NumCycles; }
     virtual void FixupKills(MachineBasicBlock *MBB) {};
     virtual void Observe(MachineInstr *MI, unsigned Count) {};
     virtual void StartBlock(MachineBasicBlock *BB);
@@ -110,16 +114,17 @@ class CustomListScheduler : public SchedulePostRATDList {
 //-----------------------------------------------------------------------------
 
 CustomListScheduler::CustomListScheduler(MachineFunction &MF,
-                                  MachineLoopInfo &MLI,
-                                  MachineDominatorTree &MDT,
-                                  AliasAnalysis *AA,
-                                  TargetSubtarget::AntiDepBreakMode ADM,
-                                  SmallVectorImpl<TargetRegisterClass*> &CP)
-: SchedulePostRATDList(MF, MLI, MDT, AA, ADM, CP)
+                                  const MachineLoopInfo &MLI,
+                                  const MachineDominatorTree &MDT,
+                                  ScheduleHazardRecognizer *HR,
+                                  AliasAnalysis *AA)
+  : SchedulePostRABase(MF, MLI, MDT)
+  , HazardRec(HR)
+  , NumCycles(0)
 {}
 
 //-----------------------------------------------------------------------------
-/*
+
 /// isSchedulingBoundary - Test if the given instruction should be
 /// considered a scheduling boundary. This primarily includes labels
 /// and terminators.
@@ -148,7 +153,7 @@ static bool isSchedulingBoundary(const MachineInstr *MI,
 
   return false;
 }
-*/
+
 //-----------------------------------------------------------------------------
 
 /// addTerminatorInstr - Add one pseudo-instruction for every branch terminator
@@ -179,25 +184,24 @@ bool TMS320C64XScheduler::addTerminatorInstr(MachineBasicBlock *MBB) {
 //-----------------------------------------------------------------------------
 
 bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
-/*
-  DEBUG(dbgs() << "TMSC320C64X PostRAScheduler pass\n");
+  AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
+  TMS320C64XMachineFunctionInfo *MFI =
+    Fn.getInfo<TMS320C64XMachineFunctionInfo>();
 
   const MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
   const MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
-  AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
-
-  AntiDepBreaker *ADB = new CriticalAntiDepBreaker(Fn);
+  ScheduleHazardRecognizer *HR =
+    TMS320C64XInstrInfo::CreatePostRAHazardRecognizer(&TM);
 
   unsigned NumCycles = 0;
 
-//  SchedulePostRABase *Scheduler =
-  SchedulePostRATDList *Scheduler =
-//  CustomListScheduler *Scheduler =
-    new CustomListScheduler(Fn, MLI, MDT, AA, ADB);
+  SchedulePostRABase *Scheduler =
+    new CustomListScheduler(Fn, MLI, MDT, HR, AA);
 
   // Loop over all of the basic blocks
   for (MachineFunction::iterator MBB = Fn.begin(), MBBe = Fn.end();
        MBB != MBBe; ++MBB) {
+    unsigned BlockCycles = 0;
 
     // do we add a TERM to the end of the block?
     bool BlockHasTerm = addTerminatorInstr(MBB);
@@ -213,7 +217,7 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
       MachineInstr *MI = prior(I);
       if (isSchedulingBoundary(MI, Fn)) {
         Scheduler->Run(MBB, I, Current, CurrentCount);
-        NumCycles += Scheduler->getCycles();
+        BlockCycles += Scheduler->getCycles();
         Scheduler->EmitSchedule();
         Current = MI;
         CurrentCount = Count - 1;
@@ -226,6 +230,7 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
     assert((MBB->begin() == Current || CurrentCount != 0) &&
            "Instruction count mismatch!");
     Scheduler->Run(MBB, MBB->begin(), Current, CurrentCount);
+    BlockCycles += Scheduler->getCycles();
     Scheduler->EmitSchedule();
 
     if (BlockHasTerm) {
@@ -242,16 +247,16 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
 
     // Update register kills
     Scheduler->FixupKills(MBB);
+
+    NumCycles += BlockCycles;
+
+    // store cycle count in machine function info
+    MFI->setScheduledCycles(MBB, BlockCycles);
+
   }
 
   delete Scheduler;
-  delete ADB;
-
-  // store cycle count in machine function info
-  TMS320C64XMachineFunctionInfo *MFI =
-    Fn.getInfo<TMS320C64XMachineFunctionInfo>();
-  MFI->setScheduledCycles(NumCycles);
-*/
+  delete HR;
 
   return true;
 }
@@ -453,9 +458,8 @@ void CustomListScheduler::ListScheduleBottomUp() {
 
     SUnit *CurSU = AvailableQueue.pop();
     while (CurSU) {
-//      if (HazardRec->getHazardType(CurSU) == ScheduleHazardRecognizer::NoHazard)
-      if (HazardRec->getHazardType(CurSU, 0)
-      == ScheduleHazardRecognizer::NoHazard)
+      if (HazardRec->getHazardType(CurSU, 0) ==
+          ScheduleHazardRecognizer::NoHazard)
         break;
 
       CurSU->isPending = true;  // This SU is not in AvailableQueue right now.
@@ -497,6 +501,8 @@ void CustomListScheduler::ListScheduleBottomUp() {
   // Reverse the order if it is bottom up.
   std::reverse(Sequence.begin(), Sequence.end());
 
+  NumCycles = CurCycle;
+
 #ifndef NDEBUG
   VerifySchedule(true);
 #endif
@@ -504,7 +510,7 @@ void CustomListScheduler::ListScheduleBottomUp() {
 
 void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
  // build the graph as always
- SchedulePostRATDList::BuildSchedGraph(AA);
+  SchedulePostRABase::BuildSchedGraph(AA);
 
   // Enforce strict order on calls and branches. This also connects our 'branch
   // happens' instruction (TERM) to the actual branch instr.
@@ -557,4 +563,3 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
 FunctionPass *llvm::createTMS320C64XScheduler(TargetMachine &tm) {
   return new TMS320C64XScheduler(tm);
 }
-#endif

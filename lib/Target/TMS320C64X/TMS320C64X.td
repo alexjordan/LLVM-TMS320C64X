@@ -73,7 +73,7 @@ def TMS320C64XInstrInfo : InstrInfo {
   let isLittleEndianEncoding = 1;
 }
 
-// Processor support 
+// Processor support
 class Proc<string Name, list<SubtargetFeature> Features>
  : Processor<Name, TMS320X64XItineraries, Features>;
 

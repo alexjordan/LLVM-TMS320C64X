@@ -509,6 +509,11 @@ public:
     // Default to just using 'nop' string.
   }
 
+  /// insert an end-of-bundle marker for EPIC or VLIW architectures.
+  virtual void insertBundleEnd(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator MI) const {
+    /* no need to implement this if you do not need it */
+  }
 
   /// isPredicated - Returns true if the instruction is already predicated.
   ///

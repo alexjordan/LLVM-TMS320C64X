@@ -208,6 +208,7 @@ class inst<dag outops,
   // default unit for 'mobile' (not units_fixed) instructions, otherwise
   // the single legal unit.
   InstUnit DefaultUnit = u;
+  bit SideInst = 0; // no, this is a fixed/pseudo-fixed inst
 
   let TSFlags{0-3} = Supported.units; // unit support
   let TSFlags{4} = side; // cluster side (0: A, 1: B)
@@ -216,6 +217,7 @@ class inst<dag outops,
   let TSFlags{10-9} = MemShift; // mem_shift_amt (XXX)
   let TSFlags{11} = MemLoadStore; // (0 for load, 1 for store)
   let TSFlags{13-12} = DefaultUnit.unit; // fixed/default unit
+  let TSFlags{14} = SideInst; // inst or c64sideinst
 }
 
 class pseudoinst<dag outops, dag inops, string asm, list<dag> pat>
@@ -460,6 +462,7 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   bits<2> MemShift = 0;
   bit MemLoadStore = 0;
   InstUnit DefaultUnit = InstUnit<0>; // not used for this inst kind
+  bit SideInst = 1; // yes this is a flexible c64sideinst
 
   let TSFlags{0-3} = Supported.units; // unit support
   let TSFlags{4} = side.bitval; // cluster side (0: A, 1: B)
@@ -468,6 +471,7 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   let TSFlags{10-9} = MemShift; // mem_shift_amt (XXX)
   let TSFlags{11} = MemLoadStore; // (0 for load, 1 for store)
   let TSFlags{13-12} = DefaultUnit.unit; // fixed/default unit
+  let TSFlags{14} = SideInst; // inst or c64sideinst
 }
 
 multiclass c64inst<dag indag, string mnemonic> {

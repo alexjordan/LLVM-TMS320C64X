@@ -113,8 +113,10 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
                                const char *ExtraCode,
                                raw_ostream &outputStream);
 
-    virtual void EmitFunctionBodyStart();
+    virtual void EmitFunctionBodyStart() {}
     virtual void EmitEndOfAsmFile(Module &M);
+
+    void printMBBInfo(const MachineBasicBlock *MBB);
 };
 
 } // anonymous
@@ -140,6 +142,7 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   const Function *F = MF.getFunction();
   this->MF = &MF;
+  Twine NewLine("\n");
 
   SetupMachineFunction(MF);
   EmitConstantPool();
@@ -156,9 +159,13 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   MachineFunction::const_iterator MBB;
   for (MBB = MF.begin(); MBB != MF.end(); ++MBB) {
 
+    // print block info right before the block
+    OutStreamer.EmitRawText(NewLine);
+    printMBBInfo(MBB);
+
     if (MBB != MF.begin()) {
       EmitBasicBlockStart(MBB);
-      OutStreamer.EmitRawText(StringRef("\n"));
+      OutStreamer.EmitRawText(NewLine);
     }
 
     MachineBasicBlock::const_iterator MI;
@@ -600,14 +607,19 @@ void TMS320C64XAsmPrinter::EmitEndOfAsmFile(Module &M) {
 
 //-----------------------------------------------------------------------------
 
-void TMS320C64XAsmPrinter::EmitFunctionBodyStart() {
+void
+TMS320C64XAsmPrinter::printMBBInfo(const MachineBasicBlock *MBB) {
+
   const TMS320C64XMachineFunctionInfo *MFI =
     MF->getInfo<TMS320C64XMachineFunctionInfo>();
 
-  SmallString<128> funcBodyString;
-  raw_svector_ostream OS(funcBodyString);
+  if (!MFI->hasScheduledCycles(MBB))
+    return;
 
-  OS << "\t; SCHEDULED CYCLES: " << MFI->getScheduledCycles() << "\n";
+  SmallString<128> str;
+  raw_svector_ostream OS(str);
+
+  OS << "\t; SCHEDULED CYCLES: " << MFI->getScheduledCycles(MBB) << "\n";
 
   OutStreamer.EmitRawText(OS.str());
 }
