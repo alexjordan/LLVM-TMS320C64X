@@ -53,7 +53,7 @@ class TMS320C64XTargetMachine : public VLIWTargetMachine {
 
     TMS320C64XTargetMachine(const Target &T,
                             const std::string &TT,
-			    const std::string &FS);
+                            const std::string &FS);
 
     virtual const TargetFrameLowering *getFrameLowering() const {
       return &FrameLowering;

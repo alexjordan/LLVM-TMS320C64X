@@ -193,6 +193,10 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
   ScheduleHazardRecognizer *HR =
     TMS320C64XInstrInfo::CreatePostRAHazardRecognizer(&TM);
 
+  // we depend on accurate latencies derived from the itineraries
+  assert(TM.getInstrItineraryData() &&
+         !TM.getInstrItineraryData()->isEmpty());
+
   unsigned NumCycles = 0;
 
   SchedulePostRABase *Scheduler =

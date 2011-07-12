@@ -60,7 +60,8 @@ TMS320C64XTargetMachine::TMS320C64XTargetMachine(const Target &T,
 // moved to FrameLowering, also the stack-alignment params are not passed
 // but hard-coded within the constructor
 //  FrameInfo(TargetFrameInfo::StackGrowsDown, 8, -4)
-  FrameLowering(*this)
+  FrameLowering(*this),
+  InstrItins(Subtarget.getInstrItineraryData())
 {}
 
 //-----------------------------------------------------------------------------
