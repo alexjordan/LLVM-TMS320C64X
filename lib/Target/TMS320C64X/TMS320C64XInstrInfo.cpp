@@ -268,7 +268,7 @@ TMS320C64XInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   MachineBasicBlock::iterator I = MBB.end();
 
   // if the machine basic block contains only debug
-  // values, there are obviously nothing to analyze
+  // values, there is obviously nothing to analyze
   while((--I)->isDebugValue())
     if (I == MBB.begin()) return false;
 

@@ -118,6 +118,7 @@ namespace llvm {
     DwarfException *DE;
 
   protected:
+
     explicit AsmPrinter(TargetMachine &TM, MCStreamer &Streamer);
 
   public:
@@ -249,6 +250,10 @@ namespace llvm {
     }
 
     virtual void EmitFunctionEntryLabel();
+
+    /// NKim, overridable method that signals whether a target desires the
+    /// emission of the fall-through labels
+    virtual bool NeedEmitFallthroughLabels() const { return false; }
 
     virtual void EmitMachineConstantPoolValue(MachineConstantPoolValue *MCPV);
 
