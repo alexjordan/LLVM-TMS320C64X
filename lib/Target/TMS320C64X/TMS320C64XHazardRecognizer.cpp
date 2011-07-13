@@ -130,18 +130,18 @@ TMS320C64XHazardRecognizer::getHazardType(SUnit *SU, int stalls) {
   unsigned idx = getUnitIndex(SU);
   if (Hzd->isUnitBusy(idx)) {
     static std::string ustr[] = {"L1", "L2", "S1", "S2", "M1", "M2", "D1", "D2"};
-    errs() << ustr[idx] << " conflict\n";
+    DEBUG(dbgs() << ustr[idx] << " conflict\n");
     return NoopHazard;
   }
 
   unsigned xuse = getExtraUse(SU);
   if (Hzd->isXResBusy(xuse)) {
     static std::string estr[] = {"error", "T1", "T2", "X1", "X2"};
-    errs() << estr[xuse] << " conflict\n";
+    DEBUG(dbgs() << estr[xuse] << " conflict\n");
     return NoopHazard;
   }
 
-  DEBUG(errs() << "--no hazard\n");
+  DEBUG(dbgs() << "--no hazard\n");
   return NoHazard;
 }
 
@@ -149,7 +149,7 @@ TMS320C64XHazardRecognizer::getHazardType(SUnit *SU, int stalls) {
 
 void TMS320C64XHazardRecognizer::EmitInstruction(SUnit *SU) {
 
-  DEBUG(errs() << "--emit\n");
+  DEBUG(dbgs() << "--emit\n");
   if (isPseudo(SU))
     return;
 
@@ -164,7 +164,7 @@ void TMS320C64XHazardRecognizer::EmitInstruction(SUnit *SU) {
 
 void TMS320C64XHazardRecognizer::AdvanceCycle() {
 
-  DEBUG(errs() << "--advance\n");
+  DEBUG(dbgs() << "--advance\n");
   Hzd->reset();
 }
 
@@ -202,7 +202,7 @@ unsigned TMS320C64XHazardRecognizer::getUnitIndex(SUnit *SU) {
   const MachineOperand &unitOp = MI->getOperand(MI->getNumOperands() - 1);
   return getUnitIndex(side, unitOp.getImm() >> 1);
 
-  //errs() << "s:" << side << " u:" << unit << "\n";
+  //dbgs() << "s:" << side << " u:" << unit << "\n";
 }
 
 //-----------------------------------------------------------------------------
@@ -223,8 +223,8 @@ TMS320C64XHazardRecognizer::analyzeOpRegs(const MachineInstr *MI) {
       if (result.second < 0)
         result.second = regside;
       else if (result.second != regside) {
-        errs() << "operand " << i << " differs from previous in: \n";
-        MI->dump();
+        DEBUG(dbgs() << "operand " << i << " differs from previous in: \n");
+        DEBUG(MI->dump());
         result.first = true;
         break;
       }
@@ -255,9 +255,9 @@ unsigned TMS320C64XHazardRecognizer::getExtraUse(SUnit *SU) {
     if (mixed || ((regside >= 0) && (regside != instside))) {
       xuse = (instside == 0) ? TMS320C64X::X1 : TMS320C64X::X2;
 
-      errs() << "x-resource use for fixed op: ";
-      MI->dump();
-      errs () << "xuse: " << getExtraStr(xuse) << "\n";
+      DEBUG(dbgs() << "x-resource use for fixed op: ");
+      DEBUG(MI->dump());
+      DEBUG(dbgs() << "xuse: " << getExtraStr(xuse) << "\n");
     }
     return xuse;
   }
@@ -395,18 +395,18 @@ TMS320C64XHazardRecognizer::analyzeMove(SUnit *SU) {
   int srcside = TMS320C64X::BRegsRegClass.contains(src.getReg()) ? 1 : 0;
   int dstside = TMS320C64X::BRegsRegClass.contains(dst.getReg()) ? 1 : 0;
 
-  errs() << "mv x-use for: ";
-  MI->dump();
-  errs() << MI->getDesc().getName() << ": src -> dst = "
+  DEBUG(dbgs() << "mv x-use for: ");
+  DEBUG(MI->dump());
+  DEBUG(dbgs() << MI->getDesc().getName() << ": src -> dst = "
     << (TMS320C64X::BRegsRegClass.contains(src.getReg())?"B":"A")
     << " -> "
     << (TMS320C64X::BRegsRegClass.contains(dst.getReg())?"B":"A")
-    << "\n";
+    << "\n");
 
   unsigned xuse = 0;
   if (srcside != dstside) {
     xuse = (dstside == 0) ? TMS320C64X::X1 : TMS320C64X::X2;
-    errs () << "mv xuse: " << getExtraStr(xuse) << "\n";
+    DEBUG(dbgs() << "mv xuse: " << getExtraStr(xuse) << "\n");
   }
 
   return std::make_pair(dstside, xuse);
@@ -421,12 +421,12 @@ TMS320C64XHazardRecognizer::getMoveHazard(SUnit *SU) const {
   tie(side, xuse) = analyzeMove(SU);
   if (Hzd->isXResBusy(xuse)) {
     static std::string estr[] = {"error", "T1", "T2", "X1", "X2"};
-    errs() << "mv " << estr[xuse] << " conflict\n";
+    DEBUG(dbgs() << "mv " << estr[xuse] << " conflict\n");
     return NoopHazard;
   }
 
   if (!Hzd->moveUnitsAvailable(side)) {
-    errs() << "mv conflict: no units left.\n";
+    DEBUG(dbgs() << "mv conflict: no units left.\n");
     return NoopHazard;
   }
 
