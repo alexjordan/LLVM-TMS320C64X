@@ -425,6 +425,7 @@ def : Pat<(tmsselect GPRegs:$false, GPRegs:$true, timm:$trueimm, predwrapper1:$t
 // since there is a way of a branch being predicated, will check again later
 
 let isBranch = 1,
+    Itinerary = Branch,
     isTerminator = 1,
     DelaySlots = 5,
     hasDelaySlot = 1 in
