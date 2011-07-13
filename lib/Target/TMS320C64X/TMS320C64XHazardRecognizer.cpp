@@ -241,7 +241,11 @@ unsigned TMS320C64XHazardRecognizer::getExtraUse(SUnit *SU) {
   const TargetInstrDesc desc = MI->getDesc();
 
   if (!isFlexibleInstruction(desc)) {
-    assert((desc.TSFlags & TMS320C64XII::is_memaccess) == 0);
+    // pretend that it uses T1. this might well be wrong, on the other hand all
+    // ld/st instructions should be replaced with their flexible forms anyway.
+    // ie. this only matters when scheduling is on and clustering is off.
+    if (desc.TSFlags & TMS320C64XII::is_memaccess)
+      return TMS320C64X::T1;
 
     // not all instructions play nice
     if (desc.isCall())
