@@ -135,6 +135,10 @@ static bool isSchedulingBoundary(const MachineInstr *MI,
   if (MI->isLabel() || MI->isInlineAsm())
     return true;
 
+  // a label disguised as an instruction
+  if (MI->getOpcode() == TMS320C64X::call_return_label)
+    return true;
+
   // TMS320C64X specific: usually post-ra scheduling sees stack pointer
   // modifications as a boundary.  we want to weave prolog/epilog into other
   // instructions, so we drop that restriction.
