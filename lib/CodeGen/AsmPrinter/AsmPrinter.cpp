@@ -1880,7 +1880,7 @@ isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const {
     return false;
   
   // The predecessor has to be immediately before this block.
-  const MachineBasicBlock *Pred = *PI;
+  MachineBasicBlock *Pred = const_cast<MachineBasicBlock*>(*PI);
   
   if (!Pred->isLayoutSuccessor(MBB))
     return false;
@@ -1889,9 +1889,8 @@ isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const {
   if (Pred->empty())
     return true;
   
-  // Otherwise, check the last instruction.
-  const MachineInstr &LastInst = Pred->back();
-  return !LastInst.getDesc().isBarrier();
+  // Otherwise, check for a terminator instruction.
+  return Pred->getFirstTerminator() == Pred->end();
 }
 
 
