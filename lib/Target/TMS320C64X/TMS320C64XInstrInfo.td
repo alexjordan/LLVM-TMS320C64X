@@ -94,7 +94,7 @@ def call_label_operand_node : SDNode<"TMSISD::RETURN_LABEL_OPERAND",
 
 // NKim, actual node corresponding to the label for returns from indirectly
 // called subroutines, this label is to be emitted just after the actual
-// branch (bnop) instruction has been issued
+// branch (b) instruction has been issued
 
 def call_return_label_node : SDNode<"TMSISD::RETURN_LABEL",
                                      SDT_call_return_label,
@@ -453,7 +453,7 @@ let isBranch = 1,
 
   // indirect (register) branches
   def branch_reg : inst<(outs), (ins GPRegs:$reg),
-                        "bnop\t.S2X\t$reg,\t5",
+                        "b\t.S2X\t$reg",
                          [(brind GPRegs:$reg)], 1, unit_s>
   {
     let Pattern = sched_pattern;
@@ -496,9 +496,15 @@ def callp_extsym : inst<(outs), (ins CallTargetOperand:$dst, variable_ops),
 // NKim, indirect call, this actually produces the same code as an indirect
 // branch, however, the semantics are slightly different as you can think
 def call_reg : inst<(outs), (ins GPRegs:$reg, variable_ops),
-                    "bnop\t.S2X\t$reg,\t5",
+                    "b\t.S2X\t$reg",
                     [(TMS320C64Xcall GPRegs:$reg)], 1, unit_s>
 {
+  let isBranch = 1;
+  let Itinerary = Branch;
+  let isTerminator = 1;
+  let DelaySlots = 5;
+  let hasDelaySlot = 1;
+
   let Pattern = sched_pattern;
   let Uses = [B3];
 }
