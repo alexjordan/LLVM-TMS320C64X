@@ -252,6 +252,9 @@ void ScheduleDAGInstrs::BuildSchedGraph(AliasAnalysis *AA) {
     SU->isCall = TID.isCall();
     SU->isCommutable = TID.isCommutable();
 
+    // The Regs used by SU
+    SmallSet<unsigned, 8> CurrentUses;
+
     // Assign the Latency field of SU using target-provided information.
     if (UnitLatencies)
       SU->Latency = 1;
@@ -401,11 +404,19 @@ void ScheduleDAGInstrs::BuildSchedGraph(AliasAnalysis *AA) {
         }
 
         UseList.clear();
+
+        // AJO the uses have been cleared, but uses by the current SU need to be
+        // restored (eg. calls may use some of the registers that are clobbered
+        // by the callee (imp-def))
+        if (CurrentUses.count(Reg))
+          UseList.push_back(SU);
+
         if (!MO.isDead())
           DefList.clear();
         DefList.push_back(SU);
       } else {
         UseList.push_back(SU);
+        CurrentUses.insert(Reg);
       }
     }
 
