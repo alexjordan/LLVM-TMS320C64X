@@ -25,6 +25,7 @@
 #include "llvm/Target/TargetInstrDesc.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetRegistry.h"
 #include "llvm/Assembly/Writer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -155,6 +156,13 @@ MachineBasicBlock::SkipPHIsAndLabels(MachineBasicBlock::iterator I) {
 }
 
 MachineBasicBlock::iterator MachineBasicBlock::getFirstTerminator() {
+
+  // ask target for specialization of this method
+  if (xParent->getTarget().getTarget().hasMBBSpecializer()) {
+    MBBSpecializer *S = xParent->getTarget().getTarget().createMBBSpecializer();
+    return S->findFirstTerminator(this);
+  }
+
   iterator I = end();
   while (I != begin() && ((--I)->getDesc().isTerminator() || I->isDebugValue()))
     ; /*noop */

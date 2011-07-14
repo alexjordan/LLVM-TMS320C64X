@@ -27,13 +27,22 @@
 #include "TMS320C64X.h"
 #include "llvm/Module.h"
 #include "llvm/Target/TargetRegistry.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 
 using namespace llvm;
 
 llvm::Target llvm::TheTMS320C64XTarget;
 
-extern "C" void LLVMInitializeTMS320C64XTargetInfo() {
-//  RegisterTarget<Triple::tms320c64x> X(TheTMS320C64XTarget, "tms320c64x", "TMS320C64X");
+extern "C" {
+  // defined in TMS320C64XMBBSpecializer.cpp
+  void InitMBBSpecializer();
+
+  void LLVMInitializeTMS320C64XTargetInfo() {
+
   RegisterTarget<Triple::tms320c64x, false>
     X(TheTMS320C64XTarget, "tms320c64x", "TMS320C64X");
+
+  // this registers the MBB specializer with the target
+  InitMBBSpecializer();
+  }
 }

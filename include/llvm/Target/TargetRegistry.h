@@ -40,6 +40,7 @@ namespace llvm {
   class TargetMachine;
   class raw_ostream;
   class formatted_raw_ostream;
+  class MBBSpecializer;
 
   MCStreamer *createAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
                                 bool isVerboseAsm,
@@ -99,6 +100,7 @@ namespace llvm {
                                              MCCodeEmitter *CE,
                                              TargetAsmBackend *TAB,
                                              bool ShowInst);
+    typedef MBBSpecializer *(*MBBSpecializerCtorTy)();
 
   private:
     /// Next - The next registered target in the linked list, maintained by the
@@ -160,6 +162,8 @@ namespace llvm {
     /// AsmStreamer, if registered (default = llvm::createAsmStreamer).
     AsmStreamerCtorTy AsmStreamerCtorFn;
 
+    MBBSpecializerCtorTy MBBSpecializerCtorFn;
+
   public:
     Target() : AsmStreamerCtorFn(llvm::createAsmStreamer) {}
 
@@ -211,6 +215,9 @@ namespace llvm {
 
     /// hasAsmStreamer - Check if this target supports streaming to files.
     bool hasAsmStreamer() const { return AsmStreamerCtorFn != 0; }
+
+    /// hasMBBSpecializer - Check if this target specializes MachineBasicBlock
+    bool hasMBBSpecializer() const { return MBBSpecializerCtorFn != 0; }
 
     /// @}
     /// @name Feature Constructors
@@ -334,6 +341,12 @@ namespace llvm {
       // AsmStreamerCtorFn is default to llvm::createAsmStreamer
       return AsmStreamerCtorFn(Ctx, OS, isVerboseAsm, useLoc,
                                InstPrint, CE, TAB, ShowInst);
+    }
+
+    MBBSpecializer *createMBBSpecializer() const {
+      if (!MBBSpecializerCtorFn)
+        return 0;
+      return MBBSpecializerCtorFn();
     }
 
     /// @}
@@ -585,6 +598,10 @@ namespace llvm {
         T.AsmStreamerCtorFn = Fn;
     }
 
+    static void RegisterMBBSpecializer(Target &T, Target::MBBSpecializerCtorTy Fn) {
+      if (!T.MBBSpecializerCtorFn)
+        T.MBBSpecializerCtorFn = Fn;
+    }
     /// @}
   };
 
@@ -774,6 +791,17 @@ namespace llvm {
     }
   };
 
+  template<class MBBSImpl>
+  struct RegisterMBBSpecializer {
+    RegisterMBBSpecializer(Target &T) {
+      TargetRegistry::RegisterMBBSpecializer(T, &Allocator);
+    }
+
+  private:
+    static MBBSpecializer *Allocator() {
+      return new MBBSImpl();
+    }
+  };
 }
 
 #endif

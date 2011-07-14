@@ -16,6 +16,7 @@
 
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/ADT/GraphTraits.h"
+#include "llvm/Support/ErrorHandling.h"
 #include <functional>
 
 namespace llvm {
@@ -406,6 +407,20 @@ private:   // Methods used to maintain doubly linked list of blocks...
   /// pred->removeSuccessor instead.
   ///
   void removePredecessor(MachineBasicBlock *pred);
+};
+
+/// MBBSpecializer - Can be registered with the target to override certain
+/// methods of the MachineBasicBlock with target specific behavior.
+class MBBSpecializer {
+public:
+  ~MBBSpecializer() {}
+  virtual MachineBasicBlock::iterator
+      findFirstTerminator(MachineBasicBlock *MBB) {
+    // XXX If registered, all members have to be imeplemented. Would be better
+    // to have default implementations.
+    llvm_unreachable("not implemented");
+    return NULL;
+  }
 };
 
 raw_ostream& operator<<(raw_ostream &OS, const MachineBasicBlock &MBB);
