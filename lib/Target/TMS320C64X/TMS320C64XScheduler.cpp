@@ -523,6 +523,7 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
   // Enforce strict order on calls and branches. This also connects our 'branch
   // happens' instruction (TERM) to the actual branch instr.
   SUnit *nextBranch = NULL;
+  SUnit *firstTerm = NULL;
   for (unsigned i = 0, e = SUnits.size(); i != e; ++i) {
     // we rely on the reverse ordering of SUnits
     const TargetInstrDesc &tid = SUnits[i].getInstr()->getDesc();
@@ -535,9 +536,22 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
     // all branch-related nodes need to be scheduled when becoming available
     if (tid.isTerminator())
       SUnits[i].isScheduleHigh = true;
+
+    // remember when the first branch of the block occurs
+    if (SUnits[i].getInstr()->getOpcode() == TMS320C64X::BR_OCCURS)
+      firstTerm = &SUnits[i];
   }
 
-  bool hasTerm = false;
+  // Nodes that are currently attached to the exit node (ie. roots), need to
+  // execute before the first branch of the block occurs.
+  // Note: we keep them connected to ExitSU.
+  if (firstTerm) {
+    for (SUnit::pred_iterator I = ExitSU.Preds.begin(), E = ExitSU.Preds.end();
+        I != E; ++I) {
+      SUnit *exitPred = I->getSUnit();
+      firstTerm->addPred(SDep(exitPred, SDep::Order, exitPred->Latency));
+    }
+  }
 
   // connect last BR_OCCURS to the exit node (0-latency, it is the exit)
   if (SUnits.size() && SUnits[0].getInstr()->getOpcode() == TMS320C64X::BR_OCCURS) {
@@ -547,10 +561,10 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
       SUnits[0].addPred(SDep(I->getSUnit(), SDep::Order, 1));
 
     ExitSU.addPred(SDep(&SUnits[0], SDep::Order, 0));
-    hasTerm = true;
   }
 
-  // attach root nodes to the special exit SU, so scheduling can start off
+  // attach any root nodes left to the special exit SU (BuildSchedGraph does
+  // not connect all). we kick off scheduling with exit's predecessors.
   for (unsigned i = 0, e = SUnits.size(); i != e; ++i) {
     // don't do this twice
     if (SUnits[i].getInstr()->getOpcode() == TMS320C64X::BR_OCCURS)
@@ -558,12 +572,16 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
 
     // It is a root if it has no successors.
     if (SUnits[i].Succs.empty()) {
-      // with no pseudo TERM node, the latency to the exit SU can be reduced
       int lat = SUnits[i].Latency;
-      if (!hasTerm)
-        lat = std::max(0, lat - 1);
 
-      ExitSU.addPred(SDep(&SUnits[i], SDep::Order, lat));
+      // use the first BR_OCCURS iso. exit, as above
+      if (firstTerm)
+        firstTerm->addPred(SDep(&SUnits[i], SDep::Order, lat));
+      else {
+        // with no pseudo TERM node, the latency to the exit SU can be reduced
+        lat = std::max(0, lat - 1);
+        ExitSU.addPred(SDep(&SUnits[i], SDep::Order, lat));
+      }
     }
   }
 }
