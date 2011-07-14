@@ -285,6 +285,9 @@ void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
          << MAI->getCommentString() << " return label for reg-calls\n";
       break;
 
+    case TMS320C64X::BR_OCCURS:
+      break;
+
     default: {
       if (BundleMode) {
         const char *prefix = "\t";
