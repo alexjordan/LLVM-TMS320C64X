@@ -501,7 +501,6 @@ def call_reg : inst<(outs), (ins GPRegs:$reg, variable_ops),
 {
   let isBranch = 1;
   let Itinerary = Branch;
-  let isTerminator = 1;
   let DelaySlots = 5;
   let hasDelaySlot = 1;
 
