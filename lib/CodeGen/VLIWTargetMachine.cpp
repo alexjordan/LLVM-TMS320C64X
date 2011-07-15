@@ -379,6 +379,12 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   PM.add(createPrologEpilogCodeInserter());
   printAndVerify(PM, "After PrologEpilogCodeInserter");
 
+  // Branch folding must be run after regalloc and prolog/epilog insertion.
+  if (OptLevel != CodeGenOpt::None && !DisableBranchFold) {
+    PM.add(createBranchFoldingPass(getEnableTailMergeDefault()));
+    printNoVerify(PM, "After BranchFolding");
+  }
+
   // Run pre-sched2 passes.
   if (addPreSched2(PM, OptLevel))
     printAndVerify(PM, "After PreSched2 passes");
@@ -387,12 +393,6 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   if (addPostRAScheduler(PM, OptLevel))
     return true;
   printAndVerify(PM, "After PostRAScheduler");
-
-  // Branch folding must be run after regalloc and prolog/epilog insertion.
-  if (OptLevel != CodeGenOpt::None && !DisableBranchFold) {
-    PM.add(createBranchFoldingPass(getEnableTailMergeDefault()));
-    printNoVerify(PM, "After BranchFolding");
-  }
 
   // Tail duplication.
   if (OptLevel != CodeGenOpt::None && !DisableTailDuplicate) {
