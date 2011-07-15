@@ -253,21 +253,21 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
 bool
 TMS320C64XInstSelectorPass::select_idxaddr(SDNode *&op,
                                            SDValue &addr,
-					   SDValue &base,
+                                           SDValue &base,
                                            SDValue &offs)
 {
   MemSDNode *mem;
   FrameIndexSDNode *FIN;
   unsigned int align, want_align;
+  DebugLoc dl = op->getDebugLoc();
 
   if (op->getOpcode() == ISD::FrameIndex) {
     // Hackity hack: llvm wants the address of a stack slot. This
     // is handled by returning the frame pointer as base and stack
     // offset as offs; the "lea_fail" instruction then adds these
     // to form a pointer.
-
-    // NKIM, changed from getCopyFromReg to getRegister !
-    base = CurDAG->getRegister(TMS320C64X::A15, MVT::i32);
+    base = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl,
+                                  TMS320C64X::A15, MVT::i32);
     FIN = cast<FrameIndexSDNode>(op);
     offs = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i32);
     return true;
@@ -294,7 +294,8 @@ TMS320C64XInstSelectorPass::select_idxaddr(SDNode *&op,
 
   if (!FIN) return false;
 
-  base = CurDAG->getRegister(TMS320C64X::A15, MVT::i32);
+  base = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl,
+                                TMS320C64X::A15, MVT::i32);
   offs = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i32);
   return true;
 }
