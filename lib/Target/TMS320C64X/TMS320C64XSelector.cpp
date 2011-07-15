@@ -320,14 +320,12 @@ bool TMS320C64XInstSelectorPass::bounce_predicate(SDNode *&op,
 void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
 
   using namespace TMS320C64X;
-#if 0
   if (TM.getSubtarget<TMS320C64XSubtarget>().enableClusterAssignment()) {
     ClusteringHeuristic *bug = new ClusterBug(CurDAG, TM);
     bug->run();
     bug->apply(CurDAG);
     delete bug;
   }
-#endif
 }
 
 //-----------------------------------------------------------------------------
