@@ -1890,6 +1890,8 @@ isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const {
     return true;
   
   // Otherwise, check for a terminator instruction.
+  // Note: Pred might still fall through if all of its branches are
+  // conditional, the analysis would be difficult though.
   return Pred->getFirstTerminator() == Pred->end();
 }
 
