@@ -210,7 +210,7 @@ class inst<dag outops,
   InstUnit DefaultUnit = u;
   bit SideInst = 0; // no, this is a fixed/pseudo-fixed inst
 
-  let TSFlags{0-3} = Supported.units; // unit support
+  let TSFlags{3-0} = Supported.units; // unit support
   let TSFlags{4} = side; // cluster side (0: A, 1: B)
   let TSFlags{7-5} = DelaySlots; // (range: [0,5])
   let TSFlags{8} = MemAccess; // (instr is load/store)
@@ -464,7 +464,7 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   InstUnit DefaultUnit = InstUnit<0>; // not used for this inst kind
   bit SideInst = 1; // yes this is a flexible c64sideinst
 
-  let TSFlags{0-3} = Supported.units; // unit support
+  let TSFlags{3-0} = Supported.units; // unit support
   let TSFlags{4} = side.bitval; // cluster side (0: A, 1: B)
   let TSFlags{7-5} = DelaySlots; // (range: [0,5])
   let TSFlags{8} = MemAccess; // (instr is load/store)
