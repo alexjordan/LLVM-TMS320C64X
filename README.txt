@@ -14,3 +14,17 @@ assistance with LLVM.
 If you're writing a package for LLVM, see docs/Packaging.html for our
 suggestions.
 
+--------------------------------
+
+This branch contains a code generating backend for the TI C64x+ VLIW processor
+(to be found in lib/Targets/TMS320C64X).
+
+It is based on the initial contribution by Jeremy Morse[1], available at
+git.srobo.org., though it now targets a COFF dialect compatible with TI's binary
+tools.
+
+Developed by members of the EPICOpt[2] team, at the Vienna University of
+Technology.
+
+[1] http://permalink.gmane.org/gmane.comp.compilers.llvm.devel/33870
+[2] http://www.complang.tuwien.ac.at/epicopt/
