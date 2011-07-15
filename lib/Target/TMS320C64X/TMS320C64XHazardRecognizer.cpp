@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "post-RA-sched"
-#define DBGMI(MI) dbgs() << MI->getDesc().getName() << ": "
+#define PRNTMI(OS, MI) OS << MI->getDesc().getName() << ": "
 
 #include "TMS320C64X.h"
 #include "TMS320C64XHazardRecognizer.h"
@@ -370,7 +370,7 @@ void TMS320C64XHazardRecognizer::setXPath(MachineInstr *MI, bool set) const {
   const TargetInstrDesc desc = MI->getDesc();
 
   if (!isFlexibleInstruction(desc)) {
-    DBGMI(MI) << "cannot set XPATH, fixed instruction\n";
+    DEBUG(PRNTMI(dbgs(), MI) << "cannot set XPATH, fixed instruction\n");
     return;
   }
 
@@ -380,7 +380,7 @@ void TMS320C64XHazardRecognizer::setXPath(MachineInstr *MI, bool set) const {
   unsigned oldval = op.getImm() & 0x1;
   unsigned newval = set ? 0x1 : 0x0;
   if (oldval != newval) {
-    DBGMI(MI) << "XPATH set to: " << newval << "\n";
+    DEBUG(PRNTMI(dbgs(), MI) << "XPATH set to: " << newval << "\n");
     op.setImm((op.getImm() & ~0x1) | newval);
   }
 }
