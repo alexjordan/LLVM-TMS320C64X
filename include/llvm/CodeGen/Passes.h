@@ -20,12 +20,25 @@
 
 namespace llvm {
 
+  class ModulePass;
   class FunctionPass;
   class MachineFunctionPass;
   class PassInfo;
   class TargetLowering;
   class RegisterCoalescer;
   class raw_ostream;
+
+  /// NKim, createMachineProfilePathBuilderPass - Path profile allows creation
+  /// of profiles for IR structures such as BasicBlocks, Functions, etc. This
+  /// pass extracts and builds machine basic block paths from the profiling info
+  /// generated for the IR
+//  FunctionPass *createMachinePathProfileBuilderPass();
+
+  /// NKim, createSuperblockFormationPass - After the profiled paths have been
+  /// reconstructed, a superblock formation can take place which identifies the
+  /// suitable regions and performs a tail-duplication in order to eliminate
+  /// side entries
+  FunctionPass *createSuperblockFormationPass();
 
   /// createUnreachableBlockEliminationPass - The LLVM code generator does not
   /// work well with unreachable basic blocks (what live ranges make sense for a

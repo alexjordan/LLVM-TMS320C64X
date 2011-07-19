@@ -15,20 +15,109 @@
 #define LLVM_PATHPROFILEINFO_H
 
 #include "llvm/BasicBlock.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/Analysis/PathNumbering.h"
 #include <stack>
+#include <list>
 
 namespace llvm {
 
-class ProfilePath;
-class ProfilePathEdge;
-class PathProfileInfo;
+//-----------------------------------------------------------------------------
+
+template <class T> class ProfilePathEdgeBase {
+
+  public:
+    ProfilePathEdgeBase(T source, T target, unsigned dupNumber)
+    : _source(source), _target(target), _duplicateNumber(dupNumber) {}
+
+    inline unsigned getDuplicateNumber() { return _duplicateNumber; }
+    inline T getSource() { return _source; }
+    inline T getTarget() { return _target; }
+
+  protected:
+
+    T _source;
+    T _target;
+    unsigned _duplicateNumber;
+};
+
+//-----------------------------------------------------------------------------
+
+typedef ProfilePathEdgeBase<BasicBlock *> ProfilePathEdge;
+typedef ProfilePathEdgeBase<MachineBasicBlock *> MachineProfilePathEdge;
 
 typedef std::vector<ProfilePathEdge> ProfilePathEdgeVector;
 typedef std::vector<ProfilePathEdge>::iterator ProfilePathEdgeIterator;
 
 typedef std::vector<BasicBlock*> ProfilePathBlockVector;
 typedef std::vector<BasicBlock*>::iterator ProfilePathBlockIterator;
+
+typedef std::list<MachineBasicBlock*> MachineProfilePathBlockList;
+
+//-----------------------------------------------------------------------------
+
+template <class T> class ProfilePathBase {
+protected:
+  unsigned int _number;
+
+  ProfilePathBase(unsigned number) : _number(number) {}
+
+public:
+  inline unsigned int getNumber() const { return _number; }
+  virtual T getFirstBlockInPath() const = 0;
+};
+
+//-----------------------------------------------------------------------------
+
+class PathProfileInfo;
+
+class ProfilePath : public ProfilePathBase<BasicBlock *> {
+public:
+  ProfilePath(unsigned num, unsigned count, double dev, PathProfileInfo *PPI);
+
+  inline unsigned getCount() const { return _count; }
+  inline double getCountStdDev() const { return _countStdDev; }
+  double getFrequency() const;
+
+  virtual BasicBlock *getFirstBlockInPath() const;
+
+  ProfilePathEdgeVector *getPathEdges() const;
+  ProfilePathBlockVector *getPathBlocks() const;
+
+private:
+  unsigned _count;
+  double _countStdDev;
+
+  // the PPI maintainer
+  PathProfileInfo *_ppi;
+};
+
+//-----------------------------------------------------------------------------
+
+class MachineProfilePath : public ProfilePathBase<const MachineBasicBlock *> {
+public:
+  MachineProfilePath(unsigned num, MachineProfilePathBlockList &MBL)
+  : ProfilePathBase<const MachineBasicBlock*>(num), BlockList(MBL) {}
+
+  const MachineBasicBlock *getFirstBlockInPath() const {
+    return BlockList.size() ? BlockList.front() : 0;
+  }
+
+  const MachineProfilePathBlockList &getPathBlocks() const {
+    return BlockList;
+  }
+
+private:
+
+  // NKim, since we do not provide a Larus/Ball-DAG together with the loader
+  // functionality for the machine basic blocks, we maintain a MBB path as a
+  // simple (ordered) list for simplicity. There is no direct, convenient and
+  // clean way for creating or propagating the profiling information to the
+  // machine layer yet. TODO
+  MachineProfilePathBlockList BlockList;
+};
+
+//-----------------------------------------------------------------------------
 
 typedef std::map<unsigned int,ProfilePath*> ProfilePathMap;
 typedef std::map<unsigned int,ProfilePath*>::iterator ProfilePathIterator;
@@ -37,45 +126,9 @@ typedef std::map<Function*,unsigned int> FunctionPathCountMap;
 typedef std::map<Function*,ProfilePathMap> FunctionPathMap;
 typedef std::map<Function*,ProfilePathMap>::iterator FunctionPathIterator;
 
-class ProfilePathEdge {
-public:
-  ProfilePathEdge(BasicBlock* source, BasicBlock* target,
-                  unsigned duplicateNumber);
+typedef std::multimap<unsigned, MachineProfilePath> MachineProfilePathMap;
 
-  inline unsigned getDuplicateNumber() { return _duplicateNumber; }
-  inline BasicBlock* getSource() { return _source; }
-  inline BasicBlock* getTarget() { return _target; }
-
-protected:
-  BasicBlock* _source;
-  BasicBlock* _target;
-  unsigned _duplicateNumber;
-};
-
-class ProfilePath {
-public:
-  ProfilePath(unsigned int number, unsigned int count,
-              double countStdDev, PathProfileInfo* ppi);
-
-  double getFrequency() const;
-
-  inline unsigned int getNumber() const { return _number; }
-  inline unsigned int getCount() const { return _count; }
-  inline double getCountStdDev() const { return _countStdDev; }
-
-  ProfilePathEdgeVector* getPathEdges() const;
-  ProfilePathBlockVector* getPathBlocks() const;
-
-  BasicBlock* getFirstBlockInPath() const;
-
-private:
-  unsigned int _number;
-  unsigned int _count;
-  double _countStdDev;
-
-  // double pointer back to the profiling info
-  PathProfileInfo* _ppi;
-};
+//-----------------------------------------------------------------------------
 
 // TODO: overload [] operator for getting path
 // Add: getFunctionCallCount()
@@ -108,6 +161,45 @@ private:
 
   friend class ProfilePath;
 };
+
+//-----------------------------------------------------------------------------
+
+class MachinePathProfileInfo {
+public:
+
+  /// Types
+  typedef MachineProfilePathMap::iterator iterator;
+  typedef MachineProfilePathMap::const_iterator const_iterator;
+  typedef MachineProfilePathMap::reverse_iterator reverse_iterator;
+
+protected:
+
+  MachineProfilePathMap MachineProfilePaths;
+
+public:
+
+  static char ID;
+
+  MachinePathProfileInfo() {}
+  ~MachinePathProfileInfo() {}
+
+  /// Iterators
+
+  iterator begin() { return MachineProfilePaths.begin(); }
+  const_iterator begin() const { return MachineProfilePaths.begin(); }
+
+  iterator end() { return MachineProfilePaths.end(); }
+  const_iterator end() const { return MachineProfilePaths.end(); }
+
+  reverse_iterator rbegin() { return MachineProfilePaths.rbegin(); }
+  reverse_iterator rend() { return MachineProfilePaths.rend(); }
+
+  /// Simple accessors (readonly)
+
+  bool isEmpty() const { return !MachineProfilePaths.size(); }
+  unsigned size() const { return MachineProfilePaths.size(); }
+};
+
 } // end namespace llvm
 
 #endif

@@ -35,7 +35,10 @@ PathProfileInfoFilename("path-profile-loader-file", cl::init("llvmprof.out"),
 namespace {
   class PathProfileLoaderPass : public ModulePass, public PathProfileInfo {
   public:
-    PathProfileLoaderPass() : ModulePass(ID) { }
+    PathProfileLoaderPass() : ModulePass(ID) {
+      dbgs() << "creating a path-profile-loader-pass!\n";
+    }
+
     ~PathProfileLoaderPass();
 
     // this pass doesn't change anything (only loads information)
@@ -49,9 +52,13 @@ namespace {
     }
 
     // required since this pass implements multiple inheritance
-                virtual void *getAdjustedAnalysisPointer(AnalysisID PI) {
+    virtual void *getAdjustedAnalysisPointer(AnalysisID PI) {
+    
+      // use this as a path-profile-info analysis
       if (PI == &PathProfileInfo::ID)
         return (PathProfileInfo*)this;
+
+      // use as a module-pass
       return this;
     }
 
@@ -100,19 +107,16 @@ ModulePass *llvm::createPathProfileLoaderPass() {
 }
 
 // ----------------------------------------------------------------------------
-// PathEdge implementation
-//
-ProfilePathEdge::ProfilePathEdge (BasicBlock* source, BasicBlock* target,
-                                  unsigned duplicateNumber)
-  : _source(source), _target(target), _duplicateNumber(duplicateNumber) {}
-
-// ----------------------------------------------------------------------------
 // Path implementation
 //
 
 ProfilePath::ProfilePath (unsigned int number, unsigned int count,
                           double countStdDev,   PathProfileInfo* ppi)
-  : _number(number) , _count(count), _countStdDev(countStdDev), _ppi(ppi) {}
+: ProfilePathBase<BasicBlock*>(number),
+  _count(count),
+  _countStdDev(countStdDev),
+  _ppi(ppi)
+{}
 
 double ProfilePath::getFrequency() const {
   return 100 * double(_count) /
@@ -224,9 +228,12 @@ BasicBlock* ProfilePath::getFirstBlockInPath() const {
 char llvm::PathProfileInfo::ID = 0;
 
 PathProfileInfo::PathProfileInfo () : _currentDag(0) , _currentFunction(0) {
+  dbgs() << "   creating a path-profile info!\n";
 }
 
 PathProfileInfo::~PathProfileInfo() {
+  dbgs() << "   destroying a path-profile info!\n";
+
   if (_currentDag)
     delete _currentDag;
 }
@@ -286,6 +293,9 @@ unsigned int PathProfileInfo::pathsRun() {
 
 // remove all generated paths
 PathProfileLoaderPass::~PathProfileLoaderPass() {
+
+  dbgs() << "destroying a path-profile-loader-pass!\n";
+
   for( FunctionPathIterator funcNext = _functionPaths.begin(),
          funcEnd = _functionPaths.end(); funcNext != funcEnd; funcNext++)
     for( ProfilePathIterator pathNext = funcNext->second.begin(),
@@ -295,6 +305,9 @@ PathProfileLoaderPass::~PathProfileLoaderPass() {
 
 // entry point of the pass; this loads and parses a file
 bool PathProfileLoaderPass::runOnModule(Module &M) {
+
+  dbgs() << "running the path-profile-loader-pass\n";
+
   // get the filename and setup the module's function references
   _filename = PathProfileInfoFilename;
   buildFunctionRefs (M);

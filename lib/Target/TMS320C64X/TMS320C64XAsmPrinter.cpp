@@ -125,11 +125,7 @@ TMS320C64XAsmPrinter::TMS320C64XAsmPrinter(TargetMachine &TM, MCStreamer &MCS)
   UnitStrings(TMS320C64XInstrInfo::getUnitStrings()),
   BundleMode(false),
   BundleOpen(false)
-{
-// exists only in the llvm-2.9 dev-trunk
-// TM.setMCSaveTempLabels(true);
-// OutContext.setAllowTemporaryLabels(true)
-}
+{}
 
 //-----------------------------------------------------------------------------
 

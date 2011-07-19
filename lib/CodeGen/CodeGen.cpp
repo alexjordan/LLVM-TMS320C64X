@@ -32,6 +32,11 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeMachineLICMPass(Registry);
   initializeMachineLoopInfoPass(Registry);
   initializeMachineModuleInfoPass(Registry);
+
+  // NKim
+//  initializeMachinePathProfileBuilderPass(Registry);
+  initializeNKimAnalysisPass(Registry);
+
   initializeMachineSinkingPass(Registry);
   initializeMachineVerifierPassPass(Registry);
   initializeOptimizePHIsPass(Registry);

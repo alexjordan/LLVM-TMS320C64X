@@ -19,6 +19,8 @@ namespace llvm {
 
 class PassRegistry;
 
+void initializeNKimAnalysisPass(PassRegistry&);
+
 /// initializeCore - Initialize all passes linked into the
 /// TransformUtils library.
 void initializeCore(PassRegistry&);
@@ -148,6 +150,11 @@ void initializeMachineLICMPass(PassRegistry&);
 void initializeMachineLoopInfoPass(PassRegistry&);
 void initializeMachineLoopRangesPass(PassRegistry&);
 void initializeMachineModuleInfoPass(PassRegistry&);
+
+// NKim
+void initializeMachinePathProfileBuilderPass(PassRegistry&);
+void initializeSuperblockFormationPass(PassRegistry&);
+
 void initializeMachineSinkingPass(PassRegistry&);
 void initializeMachineVerifierPassPass(PassRegistry&);
 void initializeMemCpyOptPass(PassRegistry&);

@@ -429,18 +429,6 @@ let isBranch = 1,
     DelaySlots = 5,
     hasDelaySlot = 1 in
 {
-  def branch : inst<(outs), (ins BranchTargetOperand:$block),
-                    "b\t$block", [(br bb:$block)], 0, unit_s>
-  {
-    let Pattern = sched_pattern;
-  }
-
-  def branch_A : inst<(outs), (ins BranchTargetOperand:$block),
-                      "b\t.S1\t$block", [(br bb:$block)], 0, unit_s>;
-
-  def branch_B : inst<(outs), (ins BranchTargetOperand:$block),
-                      "b\t.S2\t$block", [(br bb:$block)], 1, unit_s>;
-
   // conditional branches are being declared as non-predicated...
   // i am not sure whether the codegen respects this properly...
   def branch_cond : nopred_inst<(outs), (ins BranchTargetOperand:$block), 
@@ -451,12 +439,28 @@ let isBranch = 1,
     let Pattern = sched_pattern;
   }
 
-  // indirect (register) branches
-  def branch_reg : inst<(outs), (ins GPRegs:$reg),
-                        "b\t.S2X\t$reg",
-                         [(brind GPRegs:$reg)], 1, unit_s>
+  // all non-conditional branches are additionally considered as barriers
+  let isBarrier = 1 in
   {
-    let Pattern = sched_pattern;
+    def branch : inst<(outs), (ins BranchTargetOperand:$block),
+                      "b\t$block", [(br bb:$block)], 0, unit_s>
+    {
+      let Pattern = sched_pattern;
+    }
+
+    def branch_A : inst<(outs), (ins BranchTargetOperand:$block),
+                        "b\t.S1\t$block", [(br bb:$block)], 0, unit_s>;
+
+    def branch_B : inst<(outs), (ins BranchTargetOperand:$block),
+                        "b\t.S2\t$block", [(br bb:$block)], 1, unit_s>;
+
+    // indirect (register) branches
+    def branch_reg : inst<(outs), (ins GPRegs:$reg),
+                          "b\t.S2X\t$reg",
+                           [(brind GPRegs:$reg)], 1, unit_s>
+    {
+      let Pattern = sched_pattern;
+    }
   }
 } // isBranch
 

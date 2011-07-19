@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/GCStrategy.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/MachinePathProfileBuilder.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -33,11 +34,28 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/StandardPasses.h"
+#include "llvm/Analysis/PathProfileInfo.h"
+
 using namespace llvm;
 
 namespace llvm {
   bool EnableFastISel;
 }
+
+// NKim
+static cl::opt<bool> EnablePathProfileLoader("load-path-profile-info",
+    cl::Hidden, cl::desc("Load path profile information from file"),
+    cl::init(false));
+
+// NKim
+static cl::opt<bool> EnablePathReconstruction("reconstruct-profile-paths",
+    cl::Hidden, cl::desc("Reconstruct profile paths from the profile"),
+    cl::init(false));
+
+// NKim
+static cl::opt<bool> BuildSuperblocks("build-superblocks",
+    cl::Hidden, cl::desc("Build superblocks from the path profile info"),
+    cl::init(false));
 
 static cl::opt<bool> DisablePostRA("disable-post-ra", cl::Hidden,
     cl::desc("Disable Post Regalloc"));
@@ -322,6 +340,13 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
 
   // Standard Lower-Level Passes.
 
+  ModulePass *PathProfileLoaderPass = 0;
+  if (EnablePathProfileLoader) {
+    // NKim, create and run a path-profile-loader pass if required
+    PathProfileLoaderPass = createPathProfileLoaderPass();
+    PM.add(PathProfileLoaderPass);
+  }
+
   // Install a MachineModuleInfo class, which is an immutable pass that holds
   // all the per-module stuff we're generating, including MCContext.
   TargetAsmInfo *TAI = new TargetAsmInfo(*this);
@@ -355,6 +380,18 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   // If the target requests it, assign local variables to stack slots relative
   // to one another and simplify frame index references where possible.
   PM.add(createLocalStackSlotAllocationPass());
+
+  // NKim, try to reconstruct/create machine basic block paths from the
+  // profile information (which of course is required to be loaded first)
+  if (EnablePathReconstruction) {
+    MachinePathProfileBuilder *MPB = new MachinePathProfileBuilder();
+    MPB->setPathProfileInfo(PathProfileLoaderPass);
+    PM.add(MPB);
+  }
+
+  // NKim, after we have reconstructed paths for the machine basic blocks,
+  // we can perform a creation of superblocks if desired
+  if (BuildSuperblocks) PM.add(createSuperblockFormationPass());
 
   if (OptLevel != CodeGenOpt::None) {
     // With optimization, dead code should already be eliminated. However
