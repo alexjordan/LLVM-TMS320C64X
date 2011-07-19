@@ -1,4 +1,5 @@
 #define DEBUG_TYPE "predication"
+#include "llvm/Assembly/Writer.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Constants.h"

@@ -6,6 +6,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <sstream>
+
 #include <boost/config.hpp>
 #include <boost/foreach.hpp>
 #include <boost/tuple/tuple.hpp>
