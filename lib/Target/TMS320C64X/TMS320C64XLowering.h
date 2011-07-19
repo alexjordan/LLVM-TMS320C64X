@@ -113,7 +113,7 @@ class TMS320C64XLowering : public TargetLowering {
 
     void ReplaceNodeResults(SDNode *N,
                             SmallVectorImpl<SDValue>&Results,
-                            SelectionDAG &DAG);
+                            SelectionDAG &DAG) const;
 
     virtual SDValue LowerOperation(SDValue op, SelectionDAG &DAG) const;
 
@@ -132,7 +132,7 @@ class TMS320C64XLowering : public TargetLowering {
     SDValue LowerIfConv(SDValue op, SelectionDAG &DAG) const;
     SDValue LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const;
 
-    SDValue PromoteBoolean(SDValue op, SelectionDAG &DAG);
+    SDValue PromoteBoolean(SDValue op, SelectionDAG &DAG) const;
 
     std::pair<SDValue,bool> ConvertSETCC(SDValue op, SelectionDAG &DAG) const;
 };

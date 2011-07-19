@@ -289,7 +289,7 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
 
   // We want BURR for prepass scheduling as we sometimes break the DAG with
   // cycles and TD doesn't assert on that.
-  setSchedulingPreference(SchedulingForRegPressure);
+  setSchedulingPreference(Sched::RegPressure);
 }
 
 //-----------------------------------------------------------------------------
@@ -1063,9 +1063,10 @@ TMS320C64XLowering::LowerIntrinsicVoid(SDValue op, SelectionDAG &DAG) const
   return DAG.getNode(TMSISD::PRED_STORE, dl, MVT::Other, ops, 3);
 }
 
-void TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
-                                             SmallVectorImpl<SDValue>&Results,
-                                             SelectionDAG &DAG) {
+void
+TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
+                                       SmallVectorImpl<SDValue>&Results,
+                                       SelectionDAG &DAG) const {
   // Catch all intrinsics here that we want to custom lower, but not any other
   // nodes that LLVM promotes/expands/etc.
   switch (N->getOpcode()) {
@@ -1083,7 +1084,8 @@ void TMS320C64XLowering::ReplaceNodeResults(SDNode *N,
 
 // XXX: this is a hack, remove when intrinsic lowering is fixed.
 // we would actually expect all bools to be promoted to i32 after legalization
-SDValue TMS320C64XLowering::PromoteBoolean(SDValue op, SelectionDAG &DAG) {
+SDValue
+TMS320C64XLowering::PromoteBoolean(SDValue op, SelectionDAG &DAG) const {
   if (op->getValueType(0) != MVT::i1)
     return op;
 

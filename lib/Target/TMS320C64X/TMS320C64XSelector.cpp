@@ -412,7 +412,7 @@ setMemPredicate(SDNode *N, SelectionDAG *dag) {
   for (; opNum < S->getNumOperands(); ++opNum)
     Ops.push_back(S->getOperand(opNum));
 
-  dag->UpdateNodeOperands(stval, &Ops[0], Ops.size());
+  dag->UpdateNodeOperands(S, &Ops[0], Ops.size());
 
   // XXX how to disappear node N gracefully?
 }
