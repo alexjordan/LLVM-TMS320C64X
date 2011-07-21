@@ -110,8 +110,11 @@ class SuperblockFormation : public MachineFunctionPass {
     /// this method copies instructions from origMBB to cloneMBB, creates new
     /// virtual registers for defs in the clone and rewrites sources to use
     /// them. All <old, new> defs register associations are stored in the map
-    MachineBasicBlock *cloneMachineBasicBlock(MachineBasicBlock *origMBB,
-                                     DenseMap<unsigned, unsigned> &VRMap);
+//    MachineBasicBlock *cloneMachineBasicBlock(MachineBasicBlock *origMBB,
+//                                     DenseMap<unsigned, unsigned> &VRMap);
+    void copyMachineBlockContent(MachineBasicBlock *origMBB,
+                                 MachineBasicBlock *cloneMBB,
+                                 DenseMap<unsigned, unsigned> &VRMap);
 
     /// after having cloned a basic block, rewritten defs and sources to use
     /// new virtual registers as done by copyMachineBlockContent, an update

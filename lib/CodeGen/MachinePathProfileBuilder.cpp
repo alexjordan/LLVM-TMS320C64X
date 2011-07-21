@@ -7,13 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "machine-profile-path-builder"
+#define DEBUG_TYPE "machine-paths"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/MachinePathProfileBuilder.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <set>
 
 using namespace llvm;
 
@@ -224,17 +225,23 @@ MachinePathProfileBuilder::processTrace(MachineFunction &MF, ProfilePath &PP) {
       // corresponds to the IR basic block within the current profile path
       BlockList.push_back(MBB);
 
+      std::set<MachineBasicBlock*> processedExtensions;
+
       // also check, whether we are dealing with a sequence of machine bbs,
       // i.e. a case when one IR basic block is split into multiple machine
       // basic blocks, and extend if possible. We can only extend the trace,
       // if the splitting is sequential and not parallel
       while (1) {
+        processedExtensions.insert(MBB);
 
         // check whether the tail of the trace can be extended, i.e. there is
         // a (unique) MBB-successor that corresponds to the same basic block
         if (MachineBasicBlock *extensionMBB = getExtension(*MBB)) {
-          BlockList.push_back(extensionMBB);
-          MBB = extensionMBB;
+          if (!processedExtensions.count(extensionMBB)) {
+            processedExtensions.insert(extensionMBB);
+            BlockList.push_back(extensionMBB);
+            MBB = extensionMBB;
+          } else break;
         } else break;
       }
 

@@ -13,6 +13,8 @@
 
 #define DEBUG_TYPE "machine-superblock"
 #include "llvm/CodeGen/MachineSuperBlock.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -20,45 +22,40 @@ using namespace llvm;
 
 //-----------------------------------------------------------------------------
 
-MachineSuperBlock::MachineSuperBlock(const MBBVectorTy &MBBs, unsigned count)
-: mbbVector(MBBs),
+MachineSuperBlock::MachineSuperBlock(const MBBListTy &MBBs, unsigned count)
+: MBBListTy(MBBs),
   execCount(count)
 {
-  // TODO create references to the machine instructions
+  // throw in the references to the machine instructions now, thats not very
+  // efficient, but well, it works for now, and may probably be improved later
+  for (iterator I = begin(); I != end(); ++I) {
+    for (MachineBasicBlock::iterator J = (*I)->begin(); J != (*I)->end(); ++J)
+      instrList.push_back(&*J);
+
+    if ((*I)->succ_size() > 1) sideExits.push_back(*I);
+  }
 }
 
 //-----------------------------------------------------------------------------
 
-MachineSuperBlock::MachineSuperBlock(const MBBListTy &MBBs, unsigned count)
-: mbbVector(MBBs.size(), 0),
-  execCount(count)
-{
-  unsigned J = 0;
-
-  // throw in the references to the machine basic blocks first, thats not very
-  // efficient, but well, it works for now, and may probably be improved later
-  for (MBBListTy::const_iterator I = MBBs.begin(); I != MBBs.end(); ++I, ++J)
-    mbbVector[J] = *I;
-
-  // TODO, throw in instructions as well !
-}
+MachineSuperBlock::~MachineSuperBlock() {}
 
 //-----------------------------------------------------------------------------
 
 void MachineSuperBlock::verify() const {
-  if (!mbbVector.size()) return;
+  if (!size()) return;
 
-  for (unsigned I = 0; I < mbbVector.size(); ++I) {
+  for (const_iterator I = begin(); I != end(); ++I) {
+    assert(*I && "Invalid MBB within a superblock!");
 
-    assert(mbbVector[I] && "Invalid MBB within a superblock!");
-    if (I == 0) continue;
+    if (I == begin()) continue;
 
-    MachineBasicBlock *MBB = mbbVector[I];
-
-    // verify "no-side-entry" property (except header)
-    if (MBB->pred_size() != 1) {
+    // verify side entries. The header bb may have any number of side-exits,
+    // all other blocks included in the superblock are checked to have only
+    // 1 pred (preceeding in the superblock)
+    if ((*I)->pred_size() > 1) {
       dbgs() << "ERROR: Bad entry into a superblock detected!\n";
-      dbgs() << "MBB " << MBB->getName() << " has " << MBB->pred_size() - 1;
+      dbgs() << "MBB " << (*I)->getName() << " has " << (*I)->pred_size() - 1;
       dbgs() << " side entries. Superblock constraints violated!\n";
     }
   }
@@ -68,11 +65,49 @@ void MachineSuperBlock::verify() const {
 
 void MachineSuperBlock::print(const bool showInstructions) const {
   dbgs() << "Superblock [exec count: " << execCount << "]\n";
-  for (unsigned I = 0; I < mbbVector.size(); ++I) {
-    MachineBasicBlock *MBB = mbbVector[I];
-    assert(MBB && "Invalid MBB within a superblock!");
-
-    if (showInstructions) MBB->dump();
-    else dbgs() << "  " << MBB->getName() << '\n';
+  for (const_iterator I = begin(); I != end(); ++I) {
+    assert(*I && "Invalid MBB within a superblock!");
+    if (showInstructions) (*I)->dump();
+    else dbgs() << "  " << (*I)->getName() << '\n';
   }
 }
+
+//-----------------------------------------------------------------------------
+
+bool MachineSuperBlock::isRegUsed(unsigned reg) const {
+  const MachineRegisterInfo &MRI = front()->getParent()->getRegInfo();
+
+  MachineRegisterInfo::use_iterator UI;
+  for (UI = MRI.use_begin(reg); UI != MRI.use_end(); ++UI)
+    if (contains(*(*UI).getParent())) return true;
+  return false;
+}
+
+//-----------------------------------------------------------------------------
+
+bool MachineSuperBlock::isRegUsedOnly(unsigned reg) const {
+  const MachineRegisterInfo &MRI = front()->getParent()->getRegInfo();
+
+  MachineRegisterInfo::use_iterator UI;
+  for (UI = MRI.use_begin(reg); UI != MRI.use_end(); ++UI)
+    if (!contains(*(*UI).getParent())) return false;
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+
+std::set<unsigned> MachineSuperBlock::getLiveOutRegDefs() const {
+  std::set<unsigned> regSet;
+
+  for (const_instr_iterator I = instrList.begin(); I != instrList.end(); ++I) {
+    for (unsigned N = 0; N < (*I)->getNumOperands(); ++N) {
+      MachineOperand &MO = (*I)->getOperand(N);
+      if (!(MO.isDef() && MO.isReg())) continue;
+      unsigned reg = MO.getReg();
+      if (!isRegUsedOnly(reg)) regSet.insert(reg);
+    }
+  }
+  return regSet;
+}
+
+
