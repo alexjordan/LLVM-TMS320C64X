@@ -383,15 +383,15 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
 
   // NKim, try to reconstruct/create machine basic block paths from the
   // profile information (which of course is required to be loaded first)
-  if (EnablePathReconstruction) {
+  // After we have reconstructed paths for the machine basic blocks, we can
+  // perform a creation of superblocks if desired
+  if (BuildSuperblocks) {
     MachinePathProfileBuilder *MPB = new MachinePathProfileBuilder();
     MPB->setPathProfileInfo(PathProfileLoaderPass);
     PM.add(MPB);
-  }
 
-  // NKim, after we have reconstructed paths for the machine basic blocks,
-  // we can perform a creation of superblocks if desired
-  if (BuildSuperblocks) PM.add(createSuperblockFormationPass());
+    PM.add(createSuperblockFormationPass());
+  }
 
   if (OptLevel != CodeGenOpt::None) {
     // With optimization, dead code should already be eliminated. However

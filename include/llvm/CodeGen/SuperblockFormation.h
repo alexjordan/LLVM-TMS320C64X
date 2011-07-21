@@ -61,7 +61,7 @@ class SuperblockFormation : public MachineFunctionPass {
 
     /// temp containers for the SSA-housekeeping
     DenseMap<unsigned, ValueVectorTy> SSAUpdateVals;
-    SmallVector<unsigned, 64> SSAUpdateVirtRegs;
+    SmallVector<unsigned, 1024> SSAUpdateVirtRegs;
 
     /// this a set we store all created/identified non-trivial superblocks in.
     /// For the time being we offer a simple set only (for simplicity) but may
@@ -80,6 +80,10 @@ class SuperblockFormation : public MachineFunctionPass {
     /// performing a tail-duplication for each identified and created non-
     /// trivial superblock
     void processTrace(const MachineProfilePathBlockList &, const unsigned C);
+
+    /// determine whether the specified machine basic block has only one of
+    /// its predecessors already being attached to the specified list
+    bool hasOnlyOnePredInList(MachineBasicBlock *B, const MBBListTy &L) const;
 
     /// this method performs constraints checks during the initial phase of a
     /// superblock-construction. This includes checks for instructions which
@@ -106,9 +110,8 @@ class SuperblockFormation : public MachineFunctionPass {
     /// this method copies instructions from origMBB to cloneMBB, creates new
     /// virtual registers for defs in the clone and rewrites sources to use
     /// them. All <old, new> defs register associations are stored in the map
-    void copyMachineBlockContent(MachineBasicBlock *origMBB,
-                                 MachineBasicBlock *cloneMBB,
-                                 DenseMap<unsigned, unsigned> &VRMap);
+    MachineBasicBlock *cloneMachineBasicBlock(MachineBasicBlock *origMBB,
+                                     DenseMap<unsigned, unsigned> &VRMap);
 
     /// after having cloned a basic block, rewritten defs and sources to use
     /// new virtual registers as done by copyMachineBlockContent, an update

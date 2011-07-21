@@ -45,7 +45,7 @@ class MachineSuperBlock {
   /// Data containers. For the time being we provide only two containers for
   /// storing machine instructions and machine basic blocks. While redundant,
   /// the way of storing pointers to machine instructions in a single conse-
-  /// quitive list may present a much more comfortable analysis way to users
+  /// cutive list may present a much more comfortable analysis way to users
   MBBVectorTy mbbVector;
   MIVectorTy  miVector;
 

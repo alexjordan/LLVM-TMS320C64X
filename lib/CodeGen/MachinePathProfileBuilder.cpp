@@ -286,7 +286,7 @@ bool MachinePathProfileBuilder::runOnMachineFunction(MachineFunction &MF) {
 
   // show reconstructed paths
   DEBUG(emitMachineBlockPaths(MF));
-  DEBUG(dbgs() << "MachinePathProfileBuilder finished.\n");
+  DEBUG(dbgs() << "MachinePathProfileBuilder finished\n");
   return false;
 }
 
