@@ -35,9 +35,7 @@ PathProfileInfoFilename("path-profile-loader-file", cl::init("llvmprof.out"),
 namespace {
   class PathProfileLoaderPass : public ModulePass, public PathProfileInfo {
   public:
-    PathProfileLoaderPass() : ModulePass(ID) {
-      dbgs() << "creating a path-profile-loader-pass!\n";
-    }
+    PathProfileLoaderPass() : ModulePass(ID) {}
 
     ~PathProfileLoaderPass();
 
@@ -227,13 +225,9 @@ BasicBlock* ProfilePath::getFirstBlockInPath() const {
 // Pass identification
 char llvm::PathProfileInfo::ID = 0;
 
-PathProfileInfo::PathProfileInfo () : _currentDag(0) , _currentFunction(0) {
-  dbgs() << "   creating a path-profile info!\n";
-}
+PathProfileInfo::PathProfileInfo () : _currentDag(0) , _currentFunction(0) {}
 
 PathProfileInfo::~PathProfileInfo() {
-  dbgs() << "   destroying a path-profile info!\n";
-
   if (_currentDag)
     delete _currentDag;
 }
@@ -294,8 +288,6 @@ unsigned int PathProfileInfo::pathsRun() {
 // remove all generated paths
 PathProfileLoaderPass::~PathProfileLoaderPass() {
 
-  dbgs() << "destroying a path-profile-loader-pass!\n";
-
   for( FunctionPathIterator funcNext = _functionPaths.begin(),
          funcEnd = _functionPaths.end(); funcNext != funcEnd; funcNext++)
     for( ProfilePathIterator pathNext = funcNext->second.begin(),
@@ -305,8 +297,6 @@ PathProfileLoaderPass::~PathProfileLoaderPass() {
 
 // entry point of the pass; this loads and parses a file
 bool PathProfileLoaderPass::runOnModule(Module &M) {
-
-  dbgs() << "running the path-profile-loader-pass\n";
 
   // get the filename and setup the module's function references
   _filename = PathProfileInfoFilename;
