@@ -577,11 +577,13 @@ void
 TMS320C64XAsmPrinter::printMBBInfo(const MachineBasicBlock *MBB) {
   const TMS320C64XMachineFunctionInfo *MFI =
     MF->getInfo<TMS320C64XMachineFunctionInfo>();
+  // XXX not properly set yet
+  return;
 
   SmallString<128> funcBodyString;
   raw_svector_ostream OS(funcBodyString);
 
-  OS << "\t; SCHEDULED CYCLES: " << MFI->getScheduledCycles(MBB) << "\n";
+  //OS << "\t; SCHEDULED CYCLES: " << MFI->getScheduledCycles(MBB) << "\n";
 
   OutStreamer.EmitRawText(OS.str());
 }
