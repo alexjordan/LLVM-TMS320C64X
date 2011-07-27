@@ -150,7 +150,7 @@ namespace {
       (void) llvm::createMemDepPrinter();
       (void) llvm::createInstructionSimplifierPass();
 
-      (void) llvm::createPredicationPass();
+      (void) llvm::createIfConvPass();
 
       (void)new llvm::IntervalPartition();
       (void)new llvm::FindUsedTypes();

@@ -1,4 +1,4 @@
-#define DEBUG_TYPE "predication"
+#define DEBUG_TYPE "ifconv"
 #include "llvm/Assembly/Writer.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -42,9 +42,9 @@ OptGlobal("ifconv-global", cl::init(false), cl::Hidden,
   cl::desc("Use global model for if conversion."));
 
 namespace {
-  struct PredicationPass : public FunctionPass {
+  struct IfConvPass : public FunctionPass {
     static char ID; // Pass identification, replacement for typeid
-    PredicationPass() : FunctionPass(ID) {}
+    IfConvPass() : FunctionPass(ID) {}
 
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
       AU.addRequired<DominatorTree>();
@@ -78,12 +78,12 @@ namespace {
 
 }
 
-char PredicationPass::ID = 0;
-static RegisterPass<PredicationPass> X("predication", "Predicate IFs");
+char IfConvPass::ID = 0;
+static RegisterPass<IfConvPass> X("ifconv", "TMS320C64X if-conversion pass");
 
 // Public interface to the pass
-FunctionPass *llvm::createPredicationPass() {
-  return new PredicationPass();
+FunctionPass *llvm::createIfConvPass() {
+  return new IfConvPass();
 }
 
 /// ChangeToUnreachable - Insert an unreachable instruction before the specified
@@ -232,7 +232,7 @@ static void predicateInsts(InputIterator I, InputIterator E,
 }
 
 // chain predicates together
-Value *PredicationPass::combinePredicates(BasicBlock *BB,
+Value *IfConvPass::combinePredicates(BasicBlock *BB,
     std::vector<IfInfo*> &IfInfos) {
   DominatorTree &DT = getAnalysis<DominatorTree>();
   Value *Chain = NULL;
@@ -256,7 +256,7 @@ Value *PredicationPass::combinePredicates(BasicBlock *BB,
   return Chain;
 }
 
-bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
+bool IfConvPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
   BasicBlock *IfTrue, *IfFalse;
   Function &F = *BB->getParent();
 
@@ -342,7 +342,7 @@ bool PredicationPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
   return true;
 }
 
-bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
+bool IfConvPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
   assert(std::distance(pred_begin(BB), pred_end(BB)) == 2 &&
          "Function can only handle blocks with 2 predecessors!");
 
@@ -423,7 +423,7 @@ bool PredicationPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
   return true;
 }
 
-bool PredicationPass::simplify(Function &F) {
+bool IfConvPass::simplify(Function &F) {
   const TargetData *TD = getAnalysisIfAvailable<TargetData>();
 
   bool Changed = false;
@@ -462,7 +462,7 @@ bool PredicationPass::simplify(Function &F) {
 #endif
 }
 
-bool PredicationPass::predicate(Function &F) {
+bool IfConvPass::predicate(Function &F) {
   bool Changed = false;
   for (Function::iterator BBIt = ++F.begin(); BBIt != F.end(); ++BBIt) {
     BasicBlock *BB = &*BBIt;
@@ -485,7 +485,7 @@ static void redirectBranch(BasicBlock *BB, BasicBlock *Old, BasicBlock *New) {
   }
 }
 
-bool PredicationPass::predicateTopDown(Interval *Int) {
+bool IfConvPass::predicateTopDown(Interval *Int) {
   Function &F = *Int->getHeaderNode()->getParent();
   DominatorTree &DT = getAnalysis<DominatorTree>();
 
@@ -740,7 +740,7 @@ topo_tryagain:
   return false;
 }
 
-bool PredicationPass::runOnFunction(Function &F) {
+bool IfConvPass::runOnFunction(Function &F) {
   if (DumpCFG)
     dumpGraph(F);
 
@@ -761,7 +761,7 @@ bool PredicationPass::runOnFunction(Function &F) {
   return true;
 }
 
-void PredicationPass::runIterative(Function &F) {
+void IfConvPass::runIterative(Function &F) {
   bool Changed;
   do {
     Changed = predicate(F);
@@ -769,7 +769,7 @@ void PredicationPass::runIterative(Function &F) {
   } while (Changed);
 }
 
-void PredicationPass::runGlobal(Function &F) {
+void IfConvPass::runGlobal(Function &F) {
 #if 1
   Oracle orcl(PI);
   IntervalPartition &IP = getAnalysis<IntervalPartition>();
@@ -1014,7 +1014,7 @@ struct DOTGraphTraits<const Function*> : public DefaultDOTGraphTraits {
 };
 }
 
-bool PredicationPass::dumpGraph(Function &F) {
+bool IfConvPass::dumpGraph(Function &F) {
   std::string Filename = "cfg.pred." + F.getNameStr() + ".dot";
   errs() << "Writing '" << Filename << "'...";
 
