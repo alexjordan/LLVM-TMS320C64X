@@ -61,7 +61,7 @@ class SuperblockFormation : public MachineFunctionPass {
 
     /// temp containers for the SSA-housekeeping
     DenseMap<unsigned, ValueVectorTy> SSAUpdateVals;
-    SmallVector<unsigned, 1024> SSAUpdateVirtRegs;
+    SmallVector<unsigned, 256> SSAUpdateVirtRegs;
 
     /// this a set we store all created/identified non-trivial superblocks in.
     /// For the time being we offer a simple set only (for simplicity) but may
@@ -75,15 +75,15 @@ class SuperblockFormation : public MachineFunctionPass {
 
     /// Methods
 
+    /// this helper is required to drop all collected/created superblocks ni-
+    /// cely without creeating memory-leaks
+    void clearSuperblockSet();
+
     /// this method examines the specified profiled execution-path and tries
     /// to create superblocks. This includes checks for constraints and then
     /// performing a tail-duplication for each identified and created non-
     /// trivial superblock
     void processTrace(const MachineProfilePathBlockList &, const unsigned C);
-
-    /// determine whether the specified machine basic block has only one of
-    /// its predecessors already being attached to the specified list
-    bool hasOnlyOnePredInList(MachineBasicBlock *B, const MBBListTy &L) const;
 
     /// this method performs constraints checks during the initial phase of a
     /// superblock-construction. This includes checks for instructions which
@@ -110,14 +110,11 @@ class SuperblockFormation : public MachineFunctionPass {
     /// this method copies instructions from origMBB to cloneMBB, creates new
     /// virtual registers for defs in the clone and rewrites sources to use
     /// them. All <old, new> defs register associations are stored in the map
-//    MachineBasicBlock *cloneMachineBasicBlock(MachineBasicBlock *origMBB,
-//                                     DenseMap<unsigned, unsigned> &VRMap);
-    void copyMachineBlockContent(MachineBasicBlock *origMBB,
-                                 MachineBasicBlock *cloneMBB,
-                                 DenseMap<unsigned, unsigned> &VRMap);
+    MachineBasicBlock *cloneMachineBasicBlock(MachineBasicBlock *origMBB,
+                                     DenseMap<unsigned, unsigned> &VRMap);
 
     /// after having cloned a basic block, rewritten defs and sources to use
-    /// new virtual registers as done by copyMachineBlockContent, an update
+    /// new virtual registers as done by cloneMachineBasicBlock, an update
     /// of the predecessors is required. All predecessors of origMBB (except
     /// one) will be changed to preceed cloneMBB now, thus eliminating side-
     /// entries. Only the block preceeding in the superblock will be ignored
@@ -127,30 +124,24 @@ class SuperblockFormation : public MachineFunctionPass {
                         MachineBasicBlock *traceClonePred,
                         DenseMap<unsigned, unsigned> &VRMap);
 
-    /// the same rules as for predecessors applies when it comes to handle/
-    /// update the phi-instructions for the successors. Cloned blocks are
-    /// updated to succeed each other instead of the original blocks, and the
-    /// phi-instructions of the non-trace successors (i.e. side-exits) are
-    /// now extented since now receiving new values from the clones
+    /// for simplicity we copy all successors during block-cloning. However,
+    /// now each successor of the original basic block will get an additional
+    /// predecessor (clone). Therefore an update of successor's phi-instruc-
+    /// tions is required
     void updateSuccInfo(MachineBasicBlock *origMBB,
                         MachineBasicBlock *cloneMBB,
-                        MachineBasicBlock *traceOrigSucc,
-                        MachineBasicBlock *traceCloneSucc,
                         DenseMap<unsigned, unsigned> &VRMap);
 
     /// since we have rewritten virtual register defs and their local uses,
     /// as well as patching the phi-nodes from the original and cloned bbs,
     /// we most probably have destroyed the SSA-form of the code, which we
-    /// need to restore for the later passes
+    /// certainly need to restore for the later passes
     void updateSSA(MachineFunction &MF);
 
     /// in order to eliminate any existing side entries into a superlock, we
     /// implement some kind of a tail-duplication. For the time being, this
-    /// tail is created once and is used for all side-entries
+    /// tail is created once and is shared by all side-entries into the SB
     void eliminateSideEntries(const MBBListTy &SB);
-
-    /// drop superblocks nicely
-    void clearSuperblockSet();
 
   public:
 

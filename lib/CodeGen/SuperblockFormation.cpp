@@ -31,16 +31,13 @@
 
 using namespace llvm;
 
-DenseMap<unsigned, ValueVectorTy> SSAUpdateVals;
-SmallVector<unsigned, 128> SSAUpdateVirtRegs;
-
 STATISTIC(NumSuperBlocksStat, "Number of superblocks created");
 STATISTIC(NumDuplicatedBlocksStat, "Number of duplicated basic blocks");
 
 static cl::opt<unsigned>
 ExecThresh("exec-freq-thresh",
   cl::desc("Profile info execution threshold for superblocks"),
-  cl::init(10), cl::Hidden);
+  cl::init(1), cl::Hidden);
 
 //----------------------------------------------------------------------------
 
@@ -70,13 +67,7 @@ SuperblockFormation::SuperblockFormation()
 
 //----------------------------------------------------------------------------
 
-SuperblockFormation::~SuperblockFormation() {
-  while (superBlocks.size()) {
-    MachineSuperBlock *MSB = *superBlocks.begin();
-    superBlocks.erase(superBlocks.begin());
-    delete MSB;
-  }
-}
+SuperblockFormation::~SuperblockFormation() { clearSuperblockSet(); }
 
 //----------------------------------------------------------------------------
 
@@ -89,22 +80,18 @@ void SuperblockFormation::getAnalysisUsage(AnalysisUsage &AU) const {
 
 //----------------------------------------------------------------------------
 
-bool SuperblockFormation::hasOnlyOnePredInList(MachineBasicBlock *MBB,
-                                               const MBBListTy &list) const
-{
-  assert(MBB && "Bad machine basic block!");
-  if (MBB->pred_size() < 2) return true;
+void SuperblockFormation::clearSuperblockSet() {
+  while (superBlocks.size()) {
+    MachineSuperBlock *MSB = *(superBlocks.begin());
+    superBlocks.erase(superBlocks.begin());
+    delete MSB;
+  }
+}
 
-  unsigned predListCount = 0;
+//----------------------------------------------------------------------------
 
-  MachineBasicBlock::pred_iterator PI;
-  for(PI = MBB->pred_begin(); PI != MBB->pred_end(); ++PI)
-    for (MBBListTy::const_iterator I = list.begin(); I != list.end(); ++I) {
-      if (*PI == *I) ++predListCount;
-      if (predListCount > 1) return false;
-    }
-
-  return true;
+const MachineSuperBlockSetTy &SuperblockFormation::getSuperblocks() const {
+  return superBlocks;
 }
 
 //----------------------------------------------------------------------------
@@ -136,6 +123,7 @@ bool SuperblockFormation::isDuplicable(const MachineBasicBlock &MBB) const {
 
     // skip instructions that can not be safely duplicated
     if (MI->getDesc().isNotDuplicable()) return false;
+
     ++numInstructions;
   }
 
@@ -166,8 +154,6 @@ bool SuperblockFormation::isAttachableTo(MachineBasicBlock *MBB,
     // check for instructions in the basic block, that may potentially have
     // any side-effects (inline asm, or instruction with unmodeled effects)
     if (!isDuplicable(*MBB)) return false;
-
-    if (!hasOnlyOnePredInList(MBB, SB)) return false;
 
     // happens, if a loop-header appears in the middle/at the end of the trace.
     // We can not include it since it would destroy the natural ordering and
@@ -215,6 +201,7 @@ bool SuperblockFormation::isDefLiveOut(const MachineBasicBlock &MBB,
 {
   const MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
 
+  // check for any uses outside of the parent MBB
   MachineRegisterInfo::use_iterator UI;
   for (UI = MRI.use_begin(reg); UI != MRI.use_end(); ++UI)
     if ((*UI).getParent() != &MBB)  return true;
@@ -248,15 +235,13 @@ void SuperblockFormation::addSSAUpdateEntry(unsigned oldReg,
 
 //----------------------------------------------------------------------------
 
-void SuperblockFormation::updatePredInfo(MachineBasicBlock *fromMBB,
-                                         MachineBasicBlock *toMBB,
+void SuperblockFormation::updatePredInfo(MachineBasicBlock *origMBB,
+                                         MachineBasicBlock *cloneMBB,
                                          MachineBasicBlock *tracePred,
                                          MachineBasicBlock *clonePred,
                                          DenseMap<unsigned, unsigned> &VRMap)
 {
-  assert(fromMBB && toMBB && tracePred && "Bad MBB, can't update preds!");
-
-  SmallVector<std::pair<unsigned, unsigned>, 32>CopyInfo;
+  assert(origMBB && cloneMBB && tracePred && "Bad MBB, can't update preds!");
 
   /// First of all, scan over the current basic block of the superblock. We
   /// look for phi-instructions and change/update/remove the entry for each
@@ -266,44 +251,23 @@ void SuperblockFormation::updatePredInfo(MachineBasicBlock *fromMBB,
   /// the clones instead of the superblock
 
   MachineBasicBlock::iterator MI;
-  for (MI = fromMBB->begin(); MI != fromMBB->end(); ++MI) {
+  for (MI = origMBB->begin(); MI != origMBB->end(); ++MI) {
     if (!MI->isPHI()) continue;
 
-    /// in case we are dealing with a phi-instruction, for each predecessor
-    /// we need to remove the source in this instruction, since the preds
-    /// will be changed to preceed the clone (side entry removal)
+    /// in case we are dealing with a phi-instruction, for each "side entry"
+    /// predecessor we need to remove the source in this instruction, since
+    /// these preds will be changed to preceed the clone instead of the orig
 
     DEBUG(dbgs() << "Processing orig. MBB PHI-instruction" << *MI << '\n');
 
     MachineBasicBlock::pred_iterator PI;
-    for (PI = fromMBB->pred_begin(); PI != fromMBB->pred_end(); ++PI) {
-
-      // note, that in the current setup one of the clones may preceed the
-      // the current block. This (wrong) relation will be corrected later,
-      // for now just check for it and do not process
-      if (*PI == clonePred) continue;
-
-      // skip the pred preceeding in the superblock, we only update preds,
-      // which will be changed to preceed the clone which is of course not
-      // not true for the blocks within the superblock trace
+    for (PI = origMBB->pred_begin(); PI != origMBB->pred_end(); ++PI) {
       if (*PI == tracePred) continue;
 
       // find the operand source within the phi-instruction
       const unsigned predIndex = getPHISourceRegIndex(*MI, *PI);
       assert(predIndex && "Bad PHI-operand-index for the predecessor!");
 
-      // associate the def with the source and save for the updater
-//      unsigned defReg = MI->getOperand(0).getReg();
-//      unsigned srcReg = MI->getOperand(predIndex).getReg();
-//      VRMap.insert(std::make_pair(defReg, srcReg));
-
-      // create a new virtual register for a new definition
-//      const TargetRegisterClass *RC = MRI->getRegClass(defReg);
-//      unsigned newDef = MRI->createVirtualRegister(RC);
-
-      // insert a copy from the source reg to a new def
-//      CopyInfo.push_back(std::make_pair(newDef, srcReg));
-
       // entries for phi instructions must be pairs of reg/block values
       assert(MI->getOperand(predIndex + 1).isMBB() && "Bad MBB operand!");
       assert(MI->getOperand(predIndex).isReg() && "Bad register operand!");
@@ -312,112 +276,78 @@ void SuperblockFormation::updatePredInfo(MachineBasicBlock *fromMBB,
         dbgs() << "  removed: " << MI->getOperand(predIndex + 1) << '\n';
         dbgs() << "  removed: " << MI->getOperand(predIndex) << '\n');
 
-      MI->RemoveOperand(predIndex + 1); // remove source mbb
-      MI->RemoveOperand(predIndex);     // remove register
+      MI->RemoveOperand(predIndex + 1); // remove entry for side-entry-mbb
+      MI->RemoveOperand(predIndex);     // remove entry for side-entry-reg
 
-      // if no source, remove entirely
-      if (MI->getNumOperands() == 1) {
-        DEBUG(dbgs() << "  Removed PHI-instruction\n");
-        MI->eraseFromParent();
-      }
+      // if the instruction has no sources, remove entirely
+      if (MI->getNumOperands() == 1) MI->eraseFromParent();
     }
-
-    DEBUG(dbgs() << "Processing orig. MBB PHI-instruction finished.\n");
   }
 
   /// now we update all predecessors of the original machine block. This step
   /// effectively removes any side entries from the original superblock and
-  /// directs them to the cloned tail
+  /// directs them to the cloned tail block
 
   DEBUG(dbgs() << "Transfering predecessors from MBB to the clone\n");
 
-  SmallVector<MachineBasicBlock*, 64>
-    Preds(fromMBB->pred_begin(), fromMBB->pred_end());
+  SmallVector<MachineBasicBlock*, 64> Preds(
+    origMBB->pred_begin(), origMBB->pred_end());
 
   for (unsigned PI = 0; PI < Preds.size(); ++PI)
     if (Preds[PI] != tracePred) {
-      // replace fromMBB by toMBB in the successor-info
-      Preds[PI]->ReplaceUsesOfBlockWith(fromMBB, toMBB);
+      // replace origMBB by cloneMBB in the successor-info
+      Preds[PI]->ReplaceUsesOfBlockWith(origMBB, cloneMBB);
       Preds[PI]->updateTerminator();
       DEBUG(dbgs() << "  " << Preds[PI]->getName() << '\n');
     }
 
   // the edge within the original superblock trace must not be broken
-  assert(tracePred->isSuccessor(fromMBB) && "Broken trace pred-edge!");
-
-  if (clonePred) {
-    // the edge between succs/preds within the cloned tail has to be intact,
-    // and there must not be any entries from the clones into the superblock
-    assert(clonePred->isSuccessor(toMBB) && "Broken clone pred-edge!");
-    assert(!clonePred->isSuccessor(fromMBB) && "Side entry introduced!");
-  }
-
-  DEBUG(dbgs() << "Predecessor transfer finished.\n");
+  assert(tracePred->isSuccessor(origMBB) && "Broken trace pred-edge!");
 
   /// after the preds have been now corrected to enter the cloned blocks and
   /// the phi-entries for the superblock have been cleaned up, we now need to
   /// clean up the phi-instructions for the cloned blocks as well
 
-  for (MI = toMBB->begin(); MI != toMBB->end(); ++MI) {
+  for (MI = cloneMBB->begin(); MI != cloneMBB->end(); ++MI) {
     if (!MI->isPHI()) continue;
 
     // look for the phi source entry for the original predecessor
     const unsigned predIndex = getPHISourceRegIndex(*MI, tracePred);
     if (!predIndex) continue;
 
+    // entries for phi instructions must be pairs of reg/block values
+    assert(MI->getOperand(predIndex + 1).isMBB() && "Bad MBB operand!");
+    assert(MI->getOperand(predIndex).isReg() && "Bad register operand!");
+
     DEBUG(dbgs() << "Processing clone's PHI-instruction\n");
 
-    if (clonePred) {
-      // now replace the entry by the value of the clone
-      unsigned oldReg = MI->getOperand(predIndex).getReg();
-      DenseMap<unsigned, unsigned>::iterator V = VRMap.find(oldReg);  
-      if (V != VRMap.end()) {
-        MI->getOperand(predIndex).setReg(V->second);
-        MI->getOperand(predIndex + 1).setMBB(clonePred);
-      }
-    }
-    else {
-      // entries for phi instructions must be pairs of reg/block values
-      assert(MI->getOperand(predIndex + 1).isMBB() && "Bad MBB operand!");
-      assert(MI->getOperand(predIndex).isReg() && "Bad register operand!");
-
-      DEBUG(
-        dbgs() << "  removed: " << MI->getOperand(predIndex + 1) << '\n';
-        dbgs() << "  removed: " << MI->getOperand(predIndex) << '\n');
-
-      MI->RemoveOperand(predIndex + 1); // remove source mbb
-      MI->RemoveOperand(predIndex);     // remove register
-
-      if (MI->getNumOperands() == 1) {
-        DEBUG(dbgs() << "  Removed PHI-instruction\n");
-        MI->eraseFromParent();
-      }
-    }
-
-    DEBUG(dbgs() << "Processing clone's PHI-instruction finished.\n");
+    /// if the current block is not the first one in the tail, then there
+    /// is a block (cloned earlier) preceeding it. Since we have added an
+    /// additional phi-entry to each successor in the previous step, we can
+    /// simply drop the entry for the tracePred here
+    MI->RemoveOperand(predIndex + 1);
+    MI->RemoveOperand(predIndex);
+    if (MI->getNumOperands() == 1) MI->eraseFromParent();
   }
 }
 
 //----------------------------------------------------------------------------
 
-void SuperblockFormation::updateSuccInfo(MachineBasicBlock *traceMBB,
+void SuperblockFormation::updateSuccInfo(MachineBasicBlock *origMBB,
                                          MachineBasicBlock *cloneMBB,
-                                         MachineBasicBlock *traceSucc,
-                                         MachineBasicBlock *cloneSucc,
                                    DenseMap<unsigned, unsigned> &VRMap)
 {
-  assert(traceMBB && cloneMBB && "Bad MBB, can't update succs!");
-  assert(!traceMBB->isSuccessor(cloneSucc) && "Clone successor detected!");
+  assert(origMBB && cloneMBB && "Bad MBB, can't update successors!");
 
   /// There is no need for us to patch cfg-edges or correct pred/succ rela-
   /// tions. What we do here, is to adjust the phi-instructions of the succs
-  /// blocks since each of them has an additional edge from the cloned blocks
+  /// blocks since each of them has an additional edge from the cloned blocks.
+  /// To simplify matters, we add a new additional phi-entry to each succes-
+  /// sor of the original basic block. This is surely not the most efficient
+  /// way, however, it simplifies implementation greatly
 
   MachineBasicBlock::succ_iterator SI;
-  for (SI = traceMBB->succ_begin(); SI != traceMBB->succ_end(); ++SI) {
-
-    if (*SI == traceSucc) continue;
-
+  for (SI = origMBB->succ_begin(); SI != origMBB->succ_end(); ++SI) {
     DEBUG(dbgs() << "Processing succ: " << (*SI)->getName() << '\n');
 
     MachineBasicBlock::iterator MI;
@@ -426,7 +356,7 @@ void SuperblockFormation::updateSuccInfo(MachineBasicBlock *traceMBB,
       // fish for phi-instructions
       if (!MI->isPHI()) continue;
 
-      unsigned origIndex = getPHISourceRegIndex(*MI, traceMBB);
+      unsigned origIndex = getPHISourceRegIndex(*MI, origMBB);
       unsigned cloneIndex = getPHISourceRegIndex(*MI, cloneMBB);
       assert(!cloneIndex && "PHI-entry for the clone found!");
 
@@ -435,46 +365,69 @@ void SuperblockFormation::updateSuccInfo(MachineBasicBlock *traceMBB,
       DenseMap<unsigned, unsigned>::iterator V = VRMap.find(reg);
       if (V != VRMap.end()) reg = V->second;
 
-      // now add a new operand for the incoming predecessor
+      // now add a new operand for the (cloned) predecessor
       MI->addOperand(MachineOperand::CreateReg(reg, false));
       MI->addOperand(MachineOperand::CreateMBB(cloneMBB));
 
       DEBUG(
-        dbgs() << "  added PHI-operand (reg): " << reg << '\n';
-        dbgs() << "  added PHI-operand (MBB): "
-               << cloneMBB->getName() << '\n');
+        dbgs() << "  added PHI-operand (reg): ";
+        dbgs() << MI->getOperand(origIndex) << '\n';
+        dbgs() << "  added PHI-operand (MBB): ";
+        dbgs() << cloneMBB->getName() << '\n');
     }
 
-    DEBUG(dbgs() << "Processing successor finished.\n");
+    DEBUG(dbgs() << "Processing successor finished\n");
   }
 
   // when cloning a fallthrough basic block, there is a big probability, that
   // the terminator instructions are faulty, since we are going to insert the
-  // clone at the very end of the function. Therefore, correct this
+  // clone at the very end of the function. Therefore correct this. NOTE, this
+  // implicitly assumes the cloneMBB branch structure to be analyzable
   if (cloneMBB->succ_size()) cloneMBB->updateTerminator();
 }
 
 //----------------------------------------------------------------------------
 
-void SuperblockFormation::copyMachineBlockContent(MachineBasicBlock *fromMBB,
-                                                  MachineBasicBlock *toMBB,
-                                         DenseMap<unsigned, unsigned> &VRMap)
+MachineBasicBlock *
+SuperblockFormation::cloneMachineBasicBlock(MachineBasicBlock *MBB,
+                                          DenseMap<unsigned, unsigned> &VRMap)
 {
-  assert(fromMBB && toMBB && "Can not copy MBB instructions!");
+  assert(MBB && "Bad machine basic block to copy from!");
 
-  MachineFunction &MF = *(fromMBB->getParent());
+  MachineFunction &MF = *(MBB->getParent());
   MachineRegisterInfo *MRI = &MF.getRegInfo();
+  MachineBasicBlock *cloneMBB = MF.CreateMachineBasicBlock();
 
+  // insert the clone instantly, this may help to avoid pretty strange surp-
+  // rises such as inability to attach cloned instructions to the block due
+  // to the operand use/def failures, etc
+  MF.insert(MF.end(), cloneMBB);
+
+  // when creating a machine basic block without specifying a parent, note,
+  // that no successor-information is created. Therefore, patch in now. We
+  // simply copy all succs from the original block and worry about changing
+  // later. This is not the most efficient approach, but it simplifies the
+  // implementation considerably
+  MachineBasicBlock::succ_iterator SI;
+  for (SI = MBB->succ_begin(); SI != MBB->succ_end(); ++SI)
+    cloneMBB->addSuccessor(*SI);
+
+  // TODO, FIXME, i am not sure yet, but the same will most probably apply to
+  // the reg-values live into the original block as well, therefore, i patch
+  // them into the clone to be sure for now
+  MachineBasicBlock::livein_iterator LI;
+  for (LI = MBB->livein_begin(); LI != MBB->livein_end(); ++LI)
+    cloneMBB->addLiveIn(*LI);
+
+  // now iterate over the entire list of available machine instructions in
+  // the original basic block, rewrite defs to use the new virtual registers
+  // and clone the instructions into the clone-block
   MachineBasicBlock::iterator MI;
-  for (MI = fromMBB->begin(); MI != fromMBB->end(); ++MI) {
+  for (MI = MBB->begin(); MI != MBB->end(); ++MI) {
     MachineInstr *newMI = TII->duplicate(MI, MF);
 
-    // now check all operands of the newly created instruction and rewrite
-    // register uses. Also, if a use of origSucc is detected, it is changed
-    // to use cloneSucc now
     for (unsigned I = 0; I < newMI->getNumOperands(); ++I) {
       MachineOperand &MO = newMI->getOperand(I);
-
       if (!MO.isReg()) continue;
 
       // check for register definitions. We need to assign new virtual regs
@@ -495,12 +448,9 @@ void SuperblockFormation::copyMachineBlockContent(MachineBasicBlock *fromMBB,
         // we pretty sure will destroy the SSA-properties, therefore we have
         // to add the new definition to the list of availale values for the
         // old def, so the update can correct this later
-        if (isDefLiveOut(*fromMBB, oldReg)) {
-          DEBUG(
-            dbgs() << "  register " << oldReg << " is liveOut in";
-            dbgs() << " MBB " << fromMBB->getName() << '\n');
-
-          addSSAUpdateEntry(oldReg, newReg, toMBB);
+        if (isDefLiveOut(*MBB, oldReg)) {
+          DEBUG(dbgs() << "  register " << MO << " is liveOut\n");
+          addSSAUpdateEntry(oldReg, newReg, cloneMBB);
         }
       }
       else {
@@ -511,27 +461,31 @@ void SuperblockFormation::copyMachineBlockContent(MachineBasicBlock *fromMBB,
       }
     }
 
-    // append instruction to the clone
-    toMBB->insert(toMBB->end(), newMI);
+    cloneMBB->push_back(newMI);
   }
 
-  // when creating a machine basic block without specifying a parent, note,
-  // that no successor-information is created. Therefore, patch in now, even
-  // if we have to adjust this info manually later
-  MachineBasicBlock::succ_iterator SI;
-  for (SI = fromMBB->succ_begin(); SI != fromMBB->succ_end(); ++SI)
-    toMBB->addSuccessor(*SI);
+  return cloneMBB;
 }
 
 //----------------------------------------------------------------------------
 
 void SuperblockFormation::updateSSA(MachineFunction &MF) {
 
+  // NOTE, that this eventually will generate new phi's for blocks which pre-
+  // viously had only one pred but now gained an additional (cloned) pred. If
+  // there are no phi-instructions but simple copies, new phi's will be gene-
+  // rated by the updater automatically
+
   SmallVector<MachineInstr*, 16> NewPHIs;
   MachineSSAUpdater SSAUpdater(MF, &NewPHIs);
   const MachineRegisterInfo &MRI = MF.getRegInfo();
 
+  // check any of the rewritten virtual registers we have collected so far,
+  // look for associations with new virtual regs/MBB pairs (i.e. available
+  // values in the corresponding machine basic blocks) 
   for (unsigned I = 0; I < SSAUpdateVirtRegs.size(); ++I) {
+
+    // throw in the original value definition
     const unsigned virtReg = SSAUpdateVirtRegs[I];
     SSAUpdater.Initialize(virtReg);
 
@@ -544,7 +498,7 @@ void SuperblockFormation::updateSSA(MachineFunction &MF) {
     }
 
     // throw in any of available values we have collected for the original
-    // register so far
+    // register so far for affected machine basic blocks
     DenseMap<unsigned, ValueVectorTy>::iterator VI =
       SSAUpdateVals.find(virtReg);
 
@@ -556,7 +510,8 @@ void SuperblockFormation::updateSSA(MachineFunction &MF) {
         SSAUpdater.AddAvailableValue(srcMBB, srcReg);
       }
 
-    // now rewrite uses for machine basic blocks other than the orig
+    // now get the uses for machine basic blocks other than the original and
+    // finally, let the machine-ssa-updater do the tough updating job for us
     MachineRegisterInfo::use_iterator UI = MRI.use_begin(virtReg);
 
     while (UI != MRI.use_end()) {
@@ -591,79 +546,35 @@ void SuperblockFormation::eliminateSideEntries(const MBBListTy &SB) {
   if (tailBegin == SB.end()) return;
 
   // now, create an empty tail from the first side-entry position to the end
-  // of the trace. Store the original/cloned pairs in a vector temporarily
-
+  // of the trace. Since we do not duplicate the entire superblock, we select
+  // 'tailBegin' to point to the first basic block which is to be duplicated,
+  // in the tail, 'tracePred' is the basic block which preceeds 'tailBegin'
+  // in the list, and 'lastClone' is the last clone we have produced so far
   MachineFunction *MF = (*tailBegin)->getParent();
-  SmallVector<MBBPairTy, 32> tail;
 
   // basic block preceeding the tail in the superblock
   MBBListTy::const_iterator TBI = tailBegin;
-  MachineBasicBlock *tailPred = *(--TBI);
-
-  TBI = tailBegin;
+  MachineBasicBlock *tracePred = *(--TBI);
+  MachineBasicBlock *lastClone = 0;
 
   // now, from the position of the first side-entry into the superblock (TBI)
-  // to the end of this superblock, create an empty tail of machine blocks
-  while (TBI != SB.end()) {
-    MachineBasicBlock *clone = MF->CreateMachineBasicBlock();
-    tail.push_back(std::make_pair((*TBI), clone));
-    ++TBI;
-  }
+  // to the end of this superblock, create clones and adjust preds and succs
+  while (tailBegin != SB.end()) {
 
-  // now walk along the tail, clone instructions and update the terminators
-  // of the preds/succs. All preds (different from the tail layout pred) are
-  // adjusted to jump to the clone. And all successors of the original blocks
-  // will now get an other additional predecessor (which is the clone)
-  for (unsigned I = 0; I < tail.size(); ++I) {
-
-    MachineBasicBlock *origMBB = tail[I].first;
-    MachineBasicBlock *cloneMBB = tail[I].second;
-    DenseMap<unsigned, unsigned> virtRegMap;
-
-    MF->insert(MF->end(), cloneMBB);
-
-    DEBUG(dbgs() << "Copying block content for '" << origMBB->getName()
-                 << "' into clone '" << cloneMBB->getName() << '\n');
+    DenseMap<unsigned, unsigned> VRegMap;
 
     // copy all machine instructions from the original machine block to the
     // the cloned machine basic block. Create new virtual registers for defs
     // and rewrite sources to use them
-    copyMachineBlockContent(origMBB, cloneMBB, virtRegMap);
-    DEBUG(dbgs() << "Clone content after copying:\n" << *cloneMBB << '\n');
+    MachineBasicBlock *origMBB = *tailBegin;
+    MachineBasicBlock *cloneMBB = cloneMachineBasicBlock(origMBB, VRegMap);
 
-    // while updating the predecessor-terminators we need to know, whether we
-    // are dealing with a predecessor which does really preceed in the trace.
-    // Therefore: tracePred corresponds to the predecessor in the superblock,
-    // and clonePred corresponds to the predecessor in the cloned tail
-    MachineBasicBlock *tracePred = tailPred;
-    MachineBasicBlock *clonePred = 0;
-
-    if (I != 0) {
-      tracePred = tail[I-1].first;
-      clonePred = tail[I-1].second;
-    }
-
-    DEBUG(dbgs() << "Updating predecessors for MBB/clone\n";);
-    updatePredInfo(origMBB, cloneMBB, tracePred, clonePred, virtRegMap);
-
-    DEBUG(dbgs() << "Clone after pred-update:\n" << *cloneMBB << '\n';);
-
-    // now obtain successors that are following in the layout of the original
-    // trace, resp. cloned tail. There are no followers for the last blocks,
-    // i.e. nothing to distinguish, the original block as well as its clone
-    // will have the same successors
-    MachineBasicBlock *traceSucc = 0;
-    MachineBasicBlock *cloneSucc = 0;
-
-    if (I < tail.size() - 1) {
-      traceSucc = tail[I+1].first;
-      cloneSucc = tail[I+1].second;
-    }
-
-    DEBUG(dbgs() << "Updating successors for MBB/clone\n";);
-    updateSuccInfo(origMBB, cloneMBB, traceSucc, cloneSucc, virtRegMap);
-    
-    DEBUG(dbgs() << "Updating SSA properties\n");
+    // now integrate the clone into the cfg properly, (i.e. without breaking
+    // the semantics of course). This includes updating predecessor/successor
+    // edges and phis, as well as correcting the destroyed (due to cloning)
+    // SSA form
+    updatePredInfo(origMBB, cloneMBB, tracePred, lastClone, VRegMap);
+    updateSuccInfo(origMBB, cloneMBB, VRegMap);
     updateSSA(*MF);
 
     SSAUpdateVirtRegs.clear();
@@ -671,9 +582,14 @@ void SuperblockFormation::eliminateSideEntries(const MBBListTy &SB) {
 
     DEBUG(dbgs() << "Finished original MBB: " << *origMBB << "\n";);
     DEBUG(dbgs() << "Finished cloned MBB: " << *cloneMBB << "\n";);
-  }
 
-  NumDuplicatedBlocks += tail.size();
+    tracePred = origMBB;
+    lastClone = cloneMBB;
+    ++tailBegin;
+
+    // update statistics
+    ++NumDuplicatedBlocks;
+  }
 }
 
 //----------------------------------------------------------------------------
@@ -713,11 +629,10 @@ void SuperblockFormation::processTrace(const MachineProfilePathBlockList &PP,
 
     if (SB.size() > 1) {
       eliminateSideEntries(SB);
-
       MachineSuperBlock *superblock = new MachineSuperBlock(SB, count);
       superBlocks.insert(superblock);
 
-      // check again and emit the content for debug
+      // check again and emit the content for the debug
       DEBUG(superblock->verify(); superblock->print());
       ++NumSuperBlocks;
     }
@@ -752,7 +667,7 @@ bool SuperblockFormation::runOnMachineFunction(MachineFunction &MF) {
   MDT = &getAnalysis<MachineDominatorTree>();
   TII = MF.getTarget().getInstrInfo();
 
-  superBlocks.clear();
+  clearSuperblockSet();
   processedBlocks.clear();
 
   NumSuperBlocks = 0;
@@ -768,7 +683,8 @@ bool SuperblockFormation::runOnMachineFunction(MachineFunction &MF) {
     const MachineProfilePathBlockList &blocks =
       I->second.getPathBlocks();
 
-    if (blocks.size()) processTrace(blocks, count);
+    if (blocks.size() && count > ExecThresh)
+      processTrace(blocks, count);
   }
 
   NumSuperBlocksStat += NumSuperBlocks;
@@ -777,7 +693,7 @@ bool SuperblockFormation::runOnMachineFunction(MachineFunction &MF) {
   if (NumDuplicatedBlocks) {
     MDT->runOnMachineFunction(MF);
     MLI->runOnMachineFunction(MF);
-    return true;    
+    return true;
   } else return false;
 }
 
