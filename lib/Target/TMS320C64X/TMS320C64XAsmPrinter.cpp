@@ -288,14 +288,26 @@ MIiter TMS320C64XAsmPrinter::emit_bundle(MIRange mir) {
   raw_svector_ostream OS(bundleString);
 
   unsigned bundleSize = 0;
+  bool nopBundle = false;
 
   MIiter I = mir.first;
   for (; I != mir.second; ++I) {
     const MachineInstr *MI = I;
     const char *prefix = "\t";
 
-    if (MI->getDesc().getOpcode() == TMS320C64X::BUNDLE_END)
-      break;
+    // a bunch of nops will be spaced similar to a bundle
+    if (MI->getDesc().getOpcode() == TMS320C64X::noop)
+      nopBundle = true;
+
+    // bundle ends are skipped when there is another nop ahead
+    if (MI->getDesc().getOpcode() == TMS320C64X::BUNDLE_END) {
+      MIiter next = llvm::next(I);
+      if (nopBundle && next != mir.second &&
+          next->getDesc().getOpcode() == TMS320C64X::noop)
+        continue;
+      else
+        break; // end the current bundle
+    }
 
     // this instructions marks the end of the delay slots following a branch.
     // the branch acutally happened in the cycle before, thus we print the
@@ -311,7 +323,7 @@ MIiter TMS320C64XAsmPrinter::emit_bundle(MIRange mir) {
     }
 
     // continue within bundle
-    if (bundleSize)
+    if (bundleSize && !nopBundle)
       prefix = "\t||";
 
     print_predicate(MI, OS, prefix);
