@@ -28,6 +28,7 @@
 #include "TMS320C64X.h"
 #include "TMS320C64XInstrInfo.h"
 #include "TMS320C64XRegisterInfo.h"
+#include "TMS320C64XSubtarget.h"
 #include "TMS320C64XTargetMachine.h"
 #include "TMS320C64XMachineFunctionInfo.h"
 #include "TMS320C64XMCAsmInfo.h"
@@ -58,14 +59,15 @@ using namespace llvm;
 
 namespace {
 
+    typedef MachineBasicBlock::const_iterator MIiter;
+    typedef std::pair<MIiter, MIiter> MIRange;
+
 class TMS320C64XAsmPrinter : public AsmPrinter {
 
     SmallVector<const char *, 4> UnitStrings;
     bool BundleMode;
-    bool BundleOpen;
 
   public:
-
     explicit TMS320C64XAsmPrinter(TargetMachine &TM, MCStreamer &MCS);
 
     virtual const char *getPassName() const {
@@ -83,7 +85,13 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
 
     void emit_prolog(const MachineInstr *MI);
     void emit_epilog(const MachineInstr *MI);
-    void emit_inst(const MachineInstr *MI);
+
+    // if MI is special, emit it and return true
+    bool emit_special(const MachineInstr *MI);
+
+    // the following methods return an iter to the MI they handled last
+    MIiter emit_instructions(MIRange mir);
+    MIiter emit_bundle(MIRange mir);
 
     bool runOnMachineFunction(MachineFunction &F);
 
@@ -128,8 +136,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
 TMS320C64XAsmPrinter::TMS320C64XAsmPrinter(TargetMachine &TM, MCStreamer &MCS)
 : AsmPrinter(TM, MCS),
   UnitStrings(TMS320C64XInstrInfo::getUnitStrings()),
-  BundleMode(false),
-  BundleOpen(false)
+  BundleMode(TM.getSubtarget<TMS320C64XSubtarget>().enablePostRAScheduler())
 {
 // exists only in the llvm-2.9 dev-trunk
 // TM.setMCSaveTempLabels(true);
@@ -168,15 +175,16 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
       OutStreamer.EmitRawText(NewLine);
     }
 
-    MachineBasicBlock::const_iterator MI;
-    for (MI = MBB->begin(); MI != MBB->end(); ++MI) {
 
+    for (MachineBasicBlock::const_iterator MI = MBB->begin(), ME = MBB->end();
+         MI != ME; ++MI) {
       switch (MI->getDesc().getOpcode()) {
         case TMS320C64X::prolog: emit_prolog(MI); break;
         case TMS320C64X::epilog: emit_epilog(MI); break;
-        default: emit_inst(MI); break;
+        default:
+          MI = emit_instructions(std::make_pair(MI, MBB->end()));
+          break;
       }
-
     }
   }
 
@@ -252,32 +260,82 @@ void TMS320C64XAsmPrinter::emit_epilog(const MachineInstr *MI) {
 
 //-----------------------------------------------------------------------------
 
-void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
+MIiter TMS320C64XAsmPrinter::emit_instructions(MIRange mir) {
+  const MachineInstr *MI = mir.first;
 
-  SmallString<256> instString;
-  raw_svector_ostream OS(instString);
+  // emit special pseudo instructions (labels) regardless of bundling
+  if (emit_special(mir.first))
+    return mir.first;
 
+  // if code is bundled, emit a bundle at a time
+  if (BundleMode)
+    return emit_bundle(mir);
+
+  // emit a single (ordinary) instruction
+  SmallString<64> str;
+  raw_svector_ostream OS(str);
+
+  print_predicate(MI, OS);
+  printInstruction(MI, OS);
+
+  OS << "\n";
+  OutStreamer.EmitRawText(OS.str());
+  return mir.first;
+}
+
+MIiter TMS320C64XAsmPrinter::emit_bundle(MIRange mir) {
+  SmallString<512> bundleString;
+  raw_svector_ostream OS(bundleString);
+
+  unsigned bundleSize = 0;
+
+  MIiter I = mir.first;
+  for (; I != mir.second; ++I) {
+    const MachineInstr *MI = I;
+    const char *prefix = "\t";
+
+    if (MI->getDesc().getOpcode() == TMS320C64X::BUNDLE_END)
+      break;
+
+    // this instructions marks the end of the delay slots following a branch.
+    // the branch acutally happened in the cycle before, thus we print the
+    // informational output before the contents of the current bundle.
+    if (MI->getDesc().getOpcode() == TMS320C64X::BR_OCCURS) {
+      SmallString<512> brStr;
+      raw_svector_ostream OS(brStr);
+      print_predicate(MI, OS);
+      printInstruction(MI, OS);
+      OS << "\n\n";
+      OutStreamer.EmitRawText(OS.str());
+      continue;
+    }
+
+    // continue within bundle
+    if (bundleSize)
+      prefix = "\t||";
+
+    print_predicate(MI, OS, prefix);
+    printInstruction(MI, OS);
+    bundleSize++;
+    OS << "\n";
+  }
+  assert(bundleSize <= 8);
+  if (bundleSize) {
+    OS << "\n";
+    OutStreamer.EmitRawText(OS.str());
+  }
+  return I;
+}
+
+bool TMS320C64XAsmPrinter::emit_special(const MachineInstr *MI) {
+  SmallString<64> str;
+  raw_svector_ostream OS(str);
   switch (MI->getDesc().getOpcode()) {
     case TargetOpcode::INLINEASM:
       OS << MI->getOperand(0).getSymbolName();
       break;
 
-    case TMS320C64X::BUNDLE_END:
-      BundleMode = true;
-      BundleOpen = false;
-
-#if PRINT_BUNDLE_COMMENTS
-      print_predicate(MI, OS);
-      printInstruction(MI, OS);
-#endif
-      break;
-
     case TMS320C64X::call_return_label:
-      /// NOTE, return labels for indirect calls are not predicated, and
-      /// not parallelizable yet, there is no much sense for doing so for
-      /// labels, even if these labels are modeled as real instructions
-      /// (as a work-around)
-
       // instead of calling printInstruction we emit the label directly,
       // this allows us to avoid tabs being inserted automatically
       assert(MI->getOperand(0).isSymbol() && "Bad symbol operand!");
@@ -285,28 +343,13 @@ void TMS320C64XAsmPrinter::emit_inst(const MachineInstr *MI) {
          << MAI->getCommentString() << " return label for reg-calls\n";
       break;
 
-    case TMS320C64X::BR_OCCURS:
-      break;
-
-    default: {
-      if (BundleMode) {
-        const char *prefix = "\t";
-
-        if (BundleOpen) prefix = "\t||"; // continue bundle
-
-        print_predicate(MI, OS, prefix);
-        printInstruction(MI, OS);
-        BundleOpen = true;
-      }
-      else {
-        print_predicate(MI, OS);
-        printInstruction(MI, OS);
-      }
-    }
-  } // switch
+    default:
+      return false; // nothing to emit
+  }
 
   OS << "\n";
   OutStreamer.EmitRawText(OS.str());
+  return true;
 }
 
 //-----------------------------------------------------------------------------
