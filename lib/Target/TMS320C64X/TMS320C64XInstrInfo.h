@@ -79,7 +79,16 @@ enum FUEncoding {
   FU_undef
 };
 
-} // namespace TMS320
+enum Resources {
+  NUM_FUS = 4,
+  NUM_SIDES = 2
+};
+
+enum Sides {
+  ASide = 0,
+  BSide = 1
+};
+} // namespace TMS320C64XII
 
 class TMS320C64XInstrInfo : public TargetInstrInfoImpl {
 public:
@@ -92,8 +101,10 @@ private:
   // maps pseudo instructions to side-specific ones
   DenseMap<unsigned*, std::pair<unsigned,unsigned> > Pseudo2ClusteredTable;
 
-  // string representation for functional units
+  // string representation for functional units and resources
   static UnitStrings_t UnitStrings;
+  static std::string Res_a[TMS320C64XII::NUM_FUS];
+  static std::string Res_b[TMS320C64XII::NUM_FUS];
 
 public:
 
@@ -212,8 +223,14 @@ public:
     static bool Predicate_uconst_n(SDNode *in, int bits);
     static bool Predicate_const_is_positive(SDNode *in);
 
-    // functional unit -> string conversion
+    // helpers for string conversion
     static const UnitStrings_t &getUnitStrings();
+    static std::string res2Str(int r) {
+      using namespace TMS320C64XII;
+      assert(r >= 0 && r < NUM_FUS * NUM_SIDES);
+      std::string (&c)[4] = ((r & 0x1) == ASide) ? Res_a : Res_b;
+      return c[r >> 1];
+    }
 
     static void dumpFlags(const MachineInstr *MI, raw_ostream &os);
     static void dumpFlags(const TargetInstrDesc &Desc, raw_ostream &os);

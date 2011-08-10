@@ -56,8 +56,6 @@ class TMS320C64XInstSelectorPass : public SelectionDAGISel {
       return "TMS320C64X Instruction Selection";
     }
 
-    virtual void PostprocessISelDAG();
-
 // What the fail.
 #define UNKNOWN MVT::i32
 #include "TMS320C64XGenDAGISel.inc"
@@ -314,19 +312,6 @@ bool TMS320C64XInstSelectorPass::bounce_predicate(SDNode *&op,
   sz = op->getNumOperands();
   out = op->getOperand(sz-1);
   return true;
-}
-
-//-----------------------------------------------------------------------------
-
-void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
-
-  using namespace TMS320C64X;
-  if (TM.getSubtarget<TMS320C64XSubtarget>().enableClusterAssignment()) {
-    ClusteringHeuristic *bug = new ClusterBug(CurDAG, TM);
-    bug->run();
-    bug->apply(CurDAG);
-    delete bug;
-  }
 }
 
 //-----------------------------------------------------------------------------

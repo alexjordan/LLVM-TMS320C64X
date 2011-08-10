@@ -44,9 +44,16 @@ namespace C64X = llvm::TMS320C64X;
 using namespace llvm;
 
 //-----------------------------------------------------------------------------
+// Data for unit-to- string conversion
 static const char *unit_str[] = { "L", "S", "M", "D" };
 TMS320C64XInstrInfo::UnitStrings_t
   TMS320C64XInstrInfo::UnitStrings(unit_str, unit_str + 4);
+
+//-----------------------------------------------------------------------------
+// Data for resource-to-string conversion
+// Note: resource is unit+side
+std::string TMS320C64XInstrInfo::Res_a[] = { "L1", "S1", "M1", "D1" };
+std::string TMS320C64XInstrInfo::Res_b[] = { "L2", "S2", "M2", "D2" };
 
 //-----------------------------------------------------------------------------
 
