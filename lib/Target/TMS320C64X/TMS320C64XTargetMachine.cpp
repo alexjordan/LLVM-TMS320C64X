@@ -75,6 +75,16 @@ bool TMS320C64XTargetMachine::addInstSelector(PassManagerBase &PM,
 
 //-----------------------------------------------------------------------------
 
+bool TMS320C64XTargetMachine::addPreRegAlloc(PassManagerBase &PM,
+                                             CodeGenOpt::Level)
+{
+  if (Subtarget.enableClusterAssignment())
+    PM.add(createTMS320C64XClusterAssignment(*this));
+  return false;
+}
+
+//-----------------------------------------------------------------------------
+
 bool TMS320C64XTargetMachine::addPostRAScheduler(PassManagerBase &PM,
                                                 CodeGenOpt::Level OptLevel)
 {

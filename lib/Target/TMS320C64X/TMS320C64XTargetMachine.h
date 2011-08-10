@@ -94,6 +94,9 @@ class TMS320C64XTargetMachine : public VLIWTargetMachine {
     virtual bool addInstSelector(PassManagerBase &PM,
 				 CodeGenOpt::Level OptLevel);
 
+    virtual bool addPreRegAlloc(PassManagerBase &PM,
+                                CodeGenOpt::Level);
+
     virtual bool addPostRAScheduler(PassManagerBase &PM,
                                     CodeGenOpt::Level OptLevel);
 
