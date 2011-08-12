@@ -187,9 +187,10 @@ def noop : inst<(outs), (ins i32imm:$cycles), "nop\t\t$cycles", [],
 
 // Shifts and rotates
 
-let Supported = units_s in {
+let Supported = units_fixed in {
 def srl_p_rr : pseudo_rr<"shru", ".S1", unit_s, srl, 0>;
-def srl_p_ri : pseudo_ri<"shru", ".S1", (i32 uconst5:$imm), unit_s, srl, 0>;
+// moved to flexible encoding
+//def srl_p_ri : pseudo_ri<"shru", ".S1", (i32 uconst5:$imm), unit_s, srl, 0>;
 }
 def shl_p_rr : pseudo_rr<"shl", ".S1", unit_s, shl, 0>;
 def shl_p_ri : pseudo_ri<"shl", ".S1", (i32 uconst5:$imm), unit_s, shl, 0>;
@@ -205,9 +206,10 @@ def rotl_p_ri : pseudo_ri<"rotl", ".M1", (i32 uconst5:$imm), unit_m, rotl, 0>;
 // and a constant.
 // XXX - for unit D, depending on the form the constant can be sign extended
 // or zero extended; potential for datasheet bugs or data entry bugs here
-let Supported = units_notm in {
-def add_p_rr : pseudo_rr<"add", ".L1", unit_l, add, 0>;
-def add_p_ri : pseudo_ri<"add", ".L1", (i32 sconst5:$imm), unit_l, add, 0>;
+let Supported = units_fixed in {
+// moved to flexible encoding
+//def add_p_rr : pseudo_rr<"add", ".L1", unit_l, add, 0>;
+//def add_p_ri : pseudo_ri<"add", ".L1", (i32 sconst5:$imm), unit_l, add, 0>;
 }
 
 let Constraints = "$src1 = $dst", AsmString = "addk\t.S1\t$imm,\t$dst" in {
@@ -251,12 +253,14 @@ def epilog : inst<(outs), (ins), "", [], 0, unit_s> {
 
 // NB: mpy32 is c64x+ only
 
-let DelaySlots = 3,
-    hasDelaySlot = 1,
-    Itinerary = Multiply,
-    Supported = units_m in {
-def mpy32_p : pseudo_rr<"mpy32", ".M1", unit_m, mul, 0>;
-}
+// moved to flexible encoding
+//let DelaySlots = 3,
+//    hasDelaySlot = 1,
+//    Itinerary = Multiply,
+//    Supported = units_m in {
+//def mpy32_p : pseudo_rr<"mpy32", ".M1", unit_m, mul, 0>;
+//}
+//
 
 ///////////////////////////////////////////////////////////////////////////////
 // MOVE instructions                                                         //
@@ -527,17 +531,17 @@ def ret : inst<(outs), (ins), "b\t.S2\tB3", [(retflag)], 1, unit_s> {
 }
 
 let Supported = units_notm in {
-  defm add_rr : c64inst<(ins GPRegs:$src2), "add">;
-  defm add_ri : c64iinst<(ins i32imm:$src2), "add">;
+  defm add_rr : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), add, l_form, "add">;
+  defm add_ri : c64ri<(i32 sconst5:$src2), (ins i32imm:$src2), add, l_form, "add">;
 }
 
 let Supported = units_s in {
   defm srl_rr : c64swinst<(ins GPRegs:$src1), "shru">;
-  defm srl_ri : c64iinst<(ins i32imm:$src2), "shru">;
+  defm srl_ri : c64ri<(i32 uconst5:$src2), (ins i32imm:$src2), srl, s_form, "shru">;
 }
 
 // NKIM, not sure whether this works properly
-let InOperandList = (ins i32imm:$src2, pred:$s, form:$fu),
+let InOperandList = (ins i32imm:$src2, pred:$s, default_form:$fu),
     AsmString = "mvk\t.$fu\t$src2,\t$dst",
     Supported = units_s in {
   defm mvk : c64inst<(ins), "mvk">;
@@ -555,7 +559,7 @@ let DelaySlots = 3,
     hasDelaySlot = 1,
     Itinerary = Multiply,
     Supported = units_m in {
-  defm mpy32 : c64inst<(ins GPRegs:$src2), "mpy32">;
+  defm mpy32 : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), mul, m_form, "mpy32">;
 }
 
 let MemShift = 0 in {

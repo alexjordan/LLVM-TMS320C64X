@@ -62,11 +62,11 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
   RI(*this)
 {
   static const unsigned PseudoOpTbl[][3] = {
-     { C64X::add_p_rr,    C64X::add_rr_1,   C64X::add_rr_2 }
-    ,{ C64X::add_p_ri,    C64X::add_ri_1,   C64X::add_ri_2 }
-    ,{ C64X::srl_p_rr,    C64X::srl_rr_1,   C64X::srl_rr_2 }
-    ,{ C64X::srl_p_ri,    C64X::srl_ri_1,   C64X::srl_ri_2 }
-    ,{ C64X::mpy32_p,     C64X::mpy32_1,    C64X::mpy32_2  }
+    //{ C64X::add_p_rr,    C64X::add_rr_1,   C64X::add_rr_2 }
+    //{ C64X::add_p_ri,    C64X::add_ri_1,   C64X::add_ri_2 }
+     { C64X::srl_p_rr,    C64X::srl_rr_1,   C64X::srl_rr_2 }
+    //,{ C64X::srl_p_ri,    C64X::srl_ri_1,   C64X::srl_ri_2 }
+    //,{ C64X::mpy32_p,     C64X::mpy32_1,    C64X::mpy32_2  }
     // address loads (_sload = data path and FU on the same side)
     //,{ C64X::word_load_p_addr,   C64X::word_load_1,    C64X::word_load_2}
     ,{ C64X::word_load_p_addr,   C64X::word_sload_1,   C64X::word_sload_2}
@@ -107,6 +107,24 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
     dbgs() << "-- END FLAGS ---------------\n";
   }
 #endif
+
+  static const unsigned SideOpTbl[][2] = {
+     { C64X::mpy32_1,    C64X::mpy32_2 }
+    ,{ C64X::add_rr_1,   C64X::add_rr_2 }
+    ,{ C64X::add_ri_1,   C64X::add_ri_2 }
+    ,{ C64X::srl_ri_1,   C64X::srl_ri_2 }
+  };
+
+  for (unsigned i = 0, e = array_lengthof(SideOpTbl); i != e; ++i) {
+    DenseMap<unsigned, unsigned>::iterator it;
+    bool inserted;
+    unsigned SideAOp = SideOpTbl[i][0];
+    unsigned SideBOp = SideOpTbl[i][1];
+    tie(it, inserted) = Side2SideMap.insert(std::make_pair(SideAOp, SideBOp));
+    assert(inserted);
+    tie(it, inserted) = Side2SideMap.insert(std::make_pair(SideBOp, SideAOp));
+    assert(inserted);
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -629,6 +647,25 @@ int TMS320C64XInstrInfo::getOpcodeForSide(int Opcode, int Side) const {
     return I->second.first;
   else // Side B
     return I->second.second;
+}
+
+//-----------------------------------------------------------------------------
+
+int TMS320C64XInstrInfo::getSideOpcode(int Opcode, int Side) const {
+
+  const TargetInstrDesc &desc = get(Opcode);
+  assert(desc.TSFlags & TMS320C64XII::is_side_inst);
+
+  // is the given Opcode already of the requested side?
+  if ((desc.TSFlags >> TMS320C64XII::side_shift) == (unsigned) Side)
+    return Opcode;
+
+  DenseMap<unsigned, unsigned>::const_iterator I = Side2SideMap.find(Opcode);
+  if (I == Side2SideMap.end()) {
+    assert(false && "not found");
+    return -1;
+  }
+  return I->second;
 }
 
 //-----------------------------------------------------------------------------

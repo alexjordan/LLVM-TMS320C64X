@@ -44,6 +44,7 @@ enum {
   unit_m = 2,
   unit_d = 3,
   is_bside = 0x10,
+  side_shift = 4,
   is_memaccess = 0x100,
   is_store = 0x800,
   mem_align_amt_mask = 0x600,
@@ -100,6 +101,7 @@ private:
 
   // maps pseudo instructions to side-specific ones
   DenseMap<unsigned*, std::pair<unsigned,unsigned> > Pseudo2ClusteredTable;
+  DenseMap<unsigned, unsigned> Side2SideMap;
 
   // string representation for functional units and resources
   static UnitStrings_t UnitStrings;
@@ -196,6 +198,7 @@ public:
     virtual bool isPredicated(const MachineInstr *MI) const;
 
     int getOpcodeForSide(int Opcode, int Side) const;
+    int getSideOpcode(int Opcode, int Side) const;
 
     // NKIM, NON-LLVM-custom stuff, put inside the class, made static, removed
     // implementation bodies in order to avoid header-confusions and building

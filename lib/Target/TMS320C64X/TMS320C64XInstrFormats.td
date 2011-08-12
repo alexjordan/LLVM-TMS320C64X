@@ -66,6 +66,31 @@ def unit_s      : InstUnit<1>;
 def unit_m      : InstUnit<2>;
 def unit_d      : InstUnit<3>;
 
+// the form operand used to define flexible parts of an instruction.
+// note: it does NOT define the cluster side, separate instructions are
+// generated so that appropriate register classes can be used.
+class InstructionForm<dag OpTypes, int default>
+  : OptionalDefOperand<OtherVT, OpTypes, (ops (i32 default))> {
+  let PrintMethod = "printFU";
+}
+
+// maps units to the encoding of the instruction form operand used in flexible
+// instructions.
+class FormEncoding<InstUnit iu> {
+  // a 3-bit immediate where the upper 2 bits encode the functional unit and the
+  // rightmost bit signals use of the xpath (datapath for loads/stores)
+  bits<3> imm = 0;
+  let imm{2-1} = iu.unit;
+}
+
+// the following can be used to define default units per instruction
+def default_form : InstructionForm<(ops timm), -1>;
+def l_form : InstructionForm<(ops timm), FormEncoding<unit_l>.imm>;
+def s_form : InstructionForm<(ops timm), FormEncoding<unit_s>.imm>;
+def m_form : InstructionForm<(ops timm), FormEncoding<unit_m>.imm>;
+def d_form : InstructionForm<(ops timm), FormEncoding<unit_d>.imm>;
+
+
 // here is me not being able to cast int to bit...
 class InstSide<int si, bit sb> {
   int intval = si;
@@ -428,13 +453,6 @@ multiclass meminst_p<string mnemonic, PatFrag loadop, PatFrag storeop> :
 // side-specific instructions
 //
 
-class InstructionFormat<dag OpTypes> : Operand<OtherVT> {
-  let MIOperandInfo = OpTypes;
-  let PrintMethod = "printFU";
-}
-
-def form : InstructionFormat<(ops timm)>;
-
 class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
 : Instruction
 {
@@ -442,10 +460,11 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   let isPredicable = 1;
   let CodeSize = 4;
 
-  let Namespace = "C64X"; // XXX this seems to have no effect
+  //let Namespace = "C64X"; // XXX this seems to have no effect
+  let Namespace = "TMS320C64X";
 
   let OutOperandList = outops;
-  let InOperandList = !con(inops, (ins pred:$s, form:$fu));
+  let InOperandList = !con(inops, (ins pred:$s, default_form:$fu));
 
   let Itinerary = Default;
   let neverHasSideEffects = 1;
@@ -474,6 +493,13 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   let TSFlags{14} = SideInst; // inst or c64sideinst
 }
 
+class c64new<dag outops, dag inops, string mnemonic, InstructionForm format,
+             InstSide side>
+    : c64sideinst<outops, inops, mnemonic, side> {
+
+  let InOperandList = !con(inops, (ins pred:$s, format:$fu));
+}
+
 multiclass c64inst<dag indag, string mnemonic> {
         def _1 : c64sideinst<(outs ARegs:$dst), !con((ins ARegs:$src1), indag),
     mnemonic, side_a>;
@@ -481,12 +507,25 @@ multiclass c64inst<dag indag, string mnemonic> {
     mnemonic, side_b>;
 }
 
+multiclass c64rr<dag inDag, dag inOp, SDNode op, InstructionForm default,
+                 string mnemonic> {
+  def _1 : c64new<(outs ARegs:$dst), !con((ins ARegs:$src1), inOp),
+                  mnemonic, default, side_a> {
+    let Pattern = [(set ARegs:$dst, (op ARegs:$src1, inDag))];
+  }
+  def _2 : c64new<(outs BRegs:$dst), !con((ins BRegs:$src1), inOp),
+                  mnemonic, default, side_b>;
+}
+
 // immediate version ($src2 is the immediate and and $src1 supports xpath)
-multiclass c64iinst<dag indag, string mnemonic> {
-        def _1 : c64sideinst<(outs ARegs:$dst), !con((ins GPRegs:$src1), indag),
-    mnemonic, side_a>;
-        def _2 : c64sideinst<(outs BRegs:$dst), !con((ins GPRegs:$src1), indag),
-    mnemonic, side_b>;
+multiclass c64ri<dag inDag, dag inOp, SDNode op, InstructionForm default,
+                 string mnemonic> {
+  def _1 : c64new<(outs ARegs:$dst), !con((ins GPRegs:$src1), inOp),
+                       mnemonic, default, side_a> {
+    let Pattern = [(set ARegs:$dst, (op GPRegs:$src1, inDag))];
+  }
+  def _2 : c64new<(outs BRegs:$dst), !con((ins GPRegs:$src1), inOp),
+                       mnemonic, default, side_b>;
 }
 
 // swapped version (src operands swapped for added confusion)
