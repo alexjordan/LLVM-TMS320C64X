@@ -61,6 +61,7 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
 : TargetInstrInfoImpl(TMS320C64XInsts, array_lengthof(TMS320C64XInsts)),
   RI(*this)
 {
+#if 0
   static const unsigned PseudoOpTbl[][3] = {
     //{ C64X::add_p_rr,    C64X::add_rr_1,   C64X::add_rr_2 }
     //{ C64X::add_p_ri,    C64X::add_ri_1,   C64X::add_ri_2 }
@@ -69,23 +70,23 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
     //,{ C64X::mpy32_p,     C64X::mpy32_1,    C64X::mpy32_2  }
     // address loads (_sload = data path and FU on the same side)
     //,{ C64X::word_load_p_addr,   C64X::word_load_1,    C64X::word_load_2}
-    { C64X::word_load_p_addr,   C64X::word_sload_1,   C64X::word_sload_2}
-    ,{ C64X::word_store_p_addr,  C64X::word_store_1,   C64X::word_store_2}
-    ,{ C64X::hword_load_p_addr,  C64X::hword_sload_1,  C64X::hword_sload_2}
-    ,{ C64X::hword_store_p_addr, C64X::hword_store_1,  C64X::hword_store_2}
-    ,{ C64X::uhword_load_p_addr, C64X::uhword_sload_1, C64X::uhword_sload_2}
-    ,{ C64X::byte_load_p_addr,   C64X::byte_sload_1,   C64X::byte_sload_2}
-    ,{ C64X::byte_store_p_addr,  C64X::byte_store_1,   C64X::byte_store_2}
-    ,{ C64X::ubyte_load_p_addr,  C64X::ubyte_sload_1,  C64X::ubyte_sload_2}
+    //{ C64X::word_load_p_addr,   C64X::word_sload_1,   C64X::word_sload_2}
+    //{ C64X::word_store_p_addr,  C64X::word_store_1,   C64X::word_store_2}
+    //,{ C64X::hword_load_p_addr,  C64X::hword_sload_1,  C64X::hword_sload_2}
+    //,{ C64X::hword_store_p_addr, C64X::hword_store_1,  C64X::hword_store_2}
+    //,{ C64X::uhword_load_p_addr, C64X::uhword_sload_1, C64X::uhword_sload_2}
+    //,{ C64X::byte_load_p_addr,   C64X::byte_sload_1,   C64X::byte_sload_2}
+    //,{ C64X::byte_store_p_addr,  C64X::byte_store_1,   C64X::byte_store_2}
+    //,{ C64X::ubyte_load_p_addr,  C64X::ubyte_sload_1,  C64X::ubyte_sload_2}
     // index loads
-    ,{ C64X::word_load_p_idx,    C64X::word_sload_1,  C64X::word_sload_2}
-    ,{ C64X::word_store_p_idx,   C64X::word_store_1,  C64X::word_store_2}
-    ,{ C64X::hword_load_p_idx,   C64X::hword_sload_1, C64X::hword_sload_2}
-    ,{ C64X::hword_store_p_idx,  C64X::hword_store_1, C64X::hword_store_2}
-    ,{ C64X::uhword_load_p_idx,  C64X::uhword_sload_1,C64X::uhword_sload_2}
-    ,{ C64X::byte_load_p_idx,    C64X::byte_sload_1,  C64X::byte_sload_2}
-    ,{ C64X::byte_store_p_idx,   C64X::byte_store_1,  C64X::byte_store_2}
-    ,{ C64X::ubyte_load_p_idx,   C64X::ubyte_sload_1, C64X::ubyte_sload_2}
+    //,{ C64X::word_load_p_idx,    C64X::word_sload_1,  C64X::word_sload_2}
+    //,{ C64X::word_store_p_idx,   C64X::word_store_1,  C64X::word_store_2}
+    //,{ C64X::hword_load_p_idx,   C64X::hword_sload_1, C64X::hword_sload_2}
+    //,{ C64X::hword_store_p_idx,  C64X::hword_store_1, C64X::hword_store_2}
+    //,{ C64X::uhword_load_p_idx,  C64X::uhword_sload_1,C64X::uhword_sload_2}
+    //,{ C64X::byte_load_p_idx,    C64X::byte_sload_1,  C64X::byte_sload_2}
+    //,{ C64X::byte_store_p_idx,   C64X::byte_store_1,  C64X::byte_store_2}
+    //,{ C64X::ubyte_load_p_idx,   C64X::ubyte_sload_1, C64X::ubyte_sload_2}
   };
 
   for (unsigned i = 0, e = array_lengthof(PseudoOpTbl); i != e; ++i) {
@@ -96,6 +97,7 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
             std::make_pair(SideAOp, SideBOp))).second)
       assert(false && "Duplicated entries?");
   }
+#endif
 
 #if 0
   // used for debugging instruction flags
@@ -109,11 +111,21 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
 #endif
 
   static const unsigned SideOpTbl[][2] = {
-     { C64X::mpy32_1,    C64X::mpy32_2 }
-    ,{ C64X::add_rr_1,   C64X::add_rr_2 }
-    ,{ C64X::add_ri_1,   C64X::add_ri_2 }
-    ,{ C64X::srl_rr_1,   C64X::srl_rr_2 }
-    ,{ C64X::srl_ri_1,   C64X::srl_ri_2 }
+     { C64X::mpy32_1,        C64X::mpy32_2 }
+
+    ,{ C64X::add_rr_1,       C64X::add_rr_2 }
+    ,{ C64X::add_ri_1,       C64X::add_ri_2 }
+    ,{ C64X::srl_rr_1,       C64X::srl_rr_2 }
+    ,{ C64X::srl_ri_1,       C64X::srl_ri_2 }
+
+    ,{ C64X::word_load_1,    C64X::word_load_2 }
+    ,{ C64X::word_sload_1,   C64X::word_sload_2 }
+    ,{ C64X::hword_sload_1,  C64X::hword_sload_2 }
+    ,{ C64X::hword_store_1,  C64X::hword_store_2 }
+    ,{ C64X::uhword_sload_1, C64X::uhword_sload_2 }
+    ,{ C64X::byte_sload_1,   C64X::byte_sload_2 }
+    ,{ C64X::byte_store_1,   C64X::byte_store_2 }
+    ,{ C64X::ubyte_sload_1,  C64X::ubyte_sload_2 }
   };
 
   for (unsigned i = 0, e = array_lengthof(SideOpTbl); i != e; ++i) {

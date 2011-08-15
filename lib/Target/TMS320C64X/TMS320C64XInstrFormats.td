@@ -106,8 +106,10 @@ def mem_operand	: Operand<i32> {
 }
 
 // NKIM, for the time being we require the root-node to be supplied
-def addr : ComplexPattern<i32, 2, "select_addr", [], [SDNPWantRoot]>;
-def idxaddr : ComplexPattern<i32, 2, "select_idxaddr", [frameindex], [SDNPWantRoot]>;
+def addr : ComplexPattern<i32, 2, "select_addr", [frameindex], [SDNPWantRoot]>;
+
+// AJO: let select_addr defer to select_idxaddr internally (no more _idx instrs)
+//def idxaddr : ComplexPattern<i32, 2, "select_idxaddr", [frameindex], [SDNPWantRoot]>;
 
 def uconst4_xform : SDNodeXForm<imm, [{
 	return CurDAG->getTargetConstant((int)N->getSExtValue(), MVT::i32);
@@ -421,7 +423,7 @@ multiclass meminst_load_p<string mnemonic, PatFrag op> {
   }
 
   def _load_p_idx : memload<(outs GPRegs:$dst), (ins mem_operand:$ptr),
-                    [(set GPRegs:$dst, (op idxaddr:$ptr))], 0, unit_d>
+                    [(set GPRegs:$dst, (op addr:$ptr))], 0, unit_d>
   {
     let Pattern = sched_pattern;
     let AsmString = !strconcat("ld",!strconcat(mnemonic, "\t\t$ptr,\t$dst"));
@@ -438,7 +440,7 @@ multiclass meminst_store_p<string mnemonic, PatFrag op> {
   }
 
   def _store_p_idx : memstore<(outs), (ins mem_operand:$ptr, GPRegs:$reg),
-                     [(op GPRegs:$reg, idxaddr:$ptr)], 0, unit_d>
+                     [(op GPRegs:$reg, addr:$ptr)], 0, unit_d>
   {
     let Pattern = sched_pattern;
     let AsmString = !strconcat("st",!strconcat(mnemonic, "\t\t$reg,\t$ptr"));
@@ -460,7 +462,6 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   let isPredicable = 1;
   let CodeSize = 4;
 
-  //let Namespace = "C64X"; // XXX this seems to have no effect
   let Namespace = "TMS320C64X";
 
   let OutOperandList = outops;
@@ -554,7 +555,7 @@ def mem_op_b: Operand<i32> {
 }
 
 class c64sideload<dag indag, dag outdag, string load, InstSide side> :
-        c64sideinst<outdag, indag, "", side> {
+        c64new<outdag, indag, "", d_form, side> {
   let DelaySlots = 4;
   let hasDelaySlot = 1;
   let MemAccess = 1;
@@ -569,7 +570,7 @@ class c64sideload<dag indag, dag outdag, string load, InstSide side> :
 }
 
 class c64sidestore<dag indag, string store, InstSide side> :
-        c64sideinst<(outs), !con(indag, (ins GPRegs:$reg)), "", side> {
+        c64new<(outs), !con(indag, (ins GPRegs:$reg)), "", d_form, side> {
   let MemAccess = 1;
   let MemLoadStore = 1;
   let mayStore = 1;
@@ -581,17 +582,22 @@ class c64sidestore<dag indag, string store, InstSide side> :
         "\t.$fu\t$reg,\t$ptr"));
 }
 
+// non-restricted loads (not used in ISel)
 multiclass c64load<string width> {
   def _load_1 : c64sideload<(ins mem_op_a:$ptr), (outs GPRegs:$dst), width, side_a>;
   def _load_2 : c64sideload<(ins mem_op_b:$ptr), (outs GPRegs:$dst), width, side_b>;
 }
 
-multiclass c64strictload<string width> {
-  def _sload_1 : c64sideload<(ins mem_op_a:$ptr), (outs ARegs:$dst), width, side_a>;
+multiclass c64strictload<string width, PatFrag op> {
+  def _sload_1 : c64sideload<(ins mem_op_a:$ptr), (outs ARegs:$dst), width, side_a> {
+    let Pattern = [(set ARegs:$dst, (op addr:$ptr))];
+  }
   def _sload_2 : c64sideload<(ins mem_op_b:$ptr), (outs BRegs:$dst), width, side_b>;
 }
 
-multiclass c64store<string width> {
-  def _store_1 : c64sidestore<(ins mem_op_a:$ptr), width, side_a>;
+multiclass c64store<string width, PatFrag op> {
+  def _store_1 : c64sidestore<(ins mem_op_a:$ptr), width, side_a> {
+    let Pattern = [(op GPRegs:$reg, addr:$ptr)];
+  }
   def _store_2 : c64sidestore<(ins mem_op_b:$ptr), width, side_b>;
 }

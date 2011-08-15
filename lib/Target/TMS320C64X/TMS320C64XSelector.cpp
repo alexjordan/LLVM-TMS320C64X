@@ -97,7 +97,8 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
 
   // We handle all memory access in this save frame index'd accesses,
   // so bounce those to select_idxaddr
-  if (N.getOpcode() == ISD::FrameIndex) return false;
+  if (N.getOpcode() == ISD::FrameIndex)
+    return select_idxaddr(op, N, base, offs);
 
   if (N.getOpcode() == ISD::TargetExternalSymbol ||
       N.getOpcode() == ISD::TargetGlobalAddress)
@@ -290,7 +291,8 @@ TMS320C64XInstSelectorPass::select_idxaddr(SDNode *&op,
 
   FIN = dyn_cast<FrameIndexSDNode>(addr);
 
-  if (!FIN) return false;
+  // AJO: must only be called with a frame index
+  assert(FIN);
 
   base = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl,
                                 TMS320C64X::A15, MVT::i32);

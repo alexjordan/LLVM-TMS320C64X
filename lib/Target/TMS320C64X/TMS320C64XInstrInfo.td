@@ -349,7 +349,7 @@ def : Pat<(call_return_label_node texternalsym:$label),
 // FIXME: Work out what on earth to do with lea
 def lea_fail : inst<(outs ARegs:$dst), (ins mem_operand:$ptr),
                 "add\t.L1\t$ptr,\t$dst",
-                [(set ARegs:$dst, idxaddr:$ptr)],
+                [(set ARegs:$dst, addr:$ptr)],
                 0, unit_l> {
         let Pattern = sched_pattern;
 }
@@ -362,19 +362,20 @@ let MemShift = 0 in {
 defm u_i1 : meminst_load_p<"bu", zextloadi1>;
 }
 
-let MemShift = 0 in {
-defm byte : meminst_p<"b", sextloadi8, truncstorei8>;
-defm ubyte : meminst_load_p<"bu", zextloadi8>;
-}
-
-let MemShift = 1 in {
-defm hword : meminst_p<"h", sextloadi16, truncstorei16>;
-defm uhword : meminst_load_p<"hu", zextloadi16>;
-}
-
-let MemShift = 2 in {
-defm word : meminst_p<"w", load, store>;
-}
+// all moved to flexible encoding
+//let MemShift = 0 in {
+//defm byte : meminst_p<"b", sextloadi8, truncstorei8>;
+//defm ubyte : meminst_load_p<"bu", zextloadi8>;
+//}
+//
+//let MemShift = 1 in {
+//defm hword : meminst_p<"h", sextloadi16, truncstorei16>;
+//defm uhword : meminst_load_p<"hu", zextloadi16>;
+//}
+//
+//let MemShift = 2 in {
+//defm word : meminst_p<"w", load, store>;
+//}
 
 // Comparisons
 
@@ -567,19 +568,19 @@ let DelaySlots = 3,
 }
 
 let MemShift = 0 in {
-  defm byte  : c64strictload<"b">;
-  defm byte  : c64store<"b">;
-  defm ubyte : c64strictload<"bu">;
+  defm byte  : c64strictload<"b", sextloadi8>;
+  defm byte  : c64store<"b", truncstorei8>;
+  defm ubyte : c64strictload<"bu", zextloadi8>;
 }
 
 let MemShift = 1 in {
-  defm hword  : c64strictload<"h">;
-  defm hword  : c64store<"h">;
-  defm uhword : c64strictload<"hu">;
+  defm hword  : c64strictload<"h", sextloadi16>;
+  defm hword  : c64store<"h", truncstorei16>;
+  defm uhword : c64strictload<"hu", zextloadi16>;
 }
 
 let MemShift = 2 in {
   defm word : c64load<"w">;
-  defm word : c64strictload<"w">;
-  defm word : c64store<"w">;
+  defm word : c64strictload<"w", load>;
+  defm word : c64store<"w", store>;
 }
