@@ -188,8 +188,8 @@ def noop : inst<(outs), (ins i32imm:$cycles), "nop\t\t$cycles", [],
 // Shifts and rotates
 
 let Supported = units_fixed in {
-def srl_p_rr : pseudo_rr<"shru", ".S1", unit_s, srl, 0>;
 // moved to flexible encoding
+//def srl_p_rr : pseudo_rr<"shru", ".S1", unit_s, srl, 0>;
 //def srl_p_ri : pseudo_ri<"shru", ".S1", (i32 uconst5:$imm), unit_s, srl, 0>;
 }
 def shl_p_rr : pseudo_rr<"shl", ".S1", unit_s, shl, 0>;
@@ -530,13 +530,17 @@ def ret : inst<(outs), (ins), "b\t.S2\tB3", [(retflag)], 1, unit_s> {
   let DelaySlots = 5;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// side-specific instructions                                                //
+///////////////////////////////////////////////////////////////////////////////
+
 let Supported = units_notm in {
   defm add_rr : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), add, l_form, "add">;
   defm add_ri : c64ri<(i32 sconst5:$src2), (ins i32imm:$src2), add, l_form, "add">;
 }
 
 let Supported = units_s in {
-  defm srl_rr : c64swinst<(ins GPRegs:$src1), "shru">;
+  defm srl_rr : c64swp<(i32 GPRegs:$src1), (ins GPRegs:$src1), srl, s_form, "shru">;
   defm srl_ri : c64ri<(i32 uconst5:$src2), (ins i32imm:$src2), srl, s_form, "shru">;
 }
 

@@ -449,9 +449,9 @@ multiclass meminst_p<string mnemonic, PatFrag loadop, PatFrag storeop> :
   meminst_load_p<mnemonic, loadop>,
   meminst_store_p<mnemonic, storeop>;
 
-//
-// side-specific instructions
-//
+///////////////////////////////////////////////////////////////////////////////
+// side-specific instructions                                                //
+///////////////////////////////////////////////////////////////////////////////
 
 class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
 : Instruction
@@ -531,11 +531,14 @@ multiclass c64ri<dag inDag, dag inOp, SDNode op, InstructionForm default,
 // swapped version (src operands swapped for added confusion)
 // used by instructions like shift: (TI's ASM reference) src2, src1, dst.
 // LLVM has the src ops swapped and therefore $src2 must be side-fixed.
-multiclass c64swinst<dag indag, string mnemonic> {
-        def _1 : c64sideinst<(outs ARegs:$dst), !con(indag, (ins ARegs:$src2)),
-    mnemonic, side_a>;
-        def _2 : c64sideinst<(outs BRegs:$dst), !con(indag, (ins BRegs:$src2)),
-    mnemonic, side_b>;
+multiclass c64swp<dag inDag, dag inOp, SDNode op, InstructionForm default,
+                  string mnemonic> {
+  def _1 : c64new<(outs ARegs:$dst), !con(inOp, (ins ARegs:$src2)),
+                  mnemonic, default, side_a> {
+    let Pattern = [(set ARegs:$dst, (op inDag, ARegs:$src2))];
+  }
+  def _2 : c64new<(outs BRegs:$dst), !con(inOp, (ins BRegs:$src2)),
+                  mnemonic, default, side_b>;
 }
 
 // side-specific load/store

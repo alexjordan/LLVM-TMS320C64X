@@ -64,12 +64,12 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
   static const unsigned PseudoOpTbl[][3] = {
     //{ C64X::add_p_rr,    C64X::add_rr_1,   C64X::add_rr_2 }
     //{ C64X::add_p_ri,    C64X::add_ri_1,   C64X::add_ri_2 }
-     { C64X::srl_p_rr,    C64X::srl_rr_1,   C64X::srl_rr_2 }
+    //{ C64X::srl_p_rr,    C64X::srl_rr_1,   C64X::srl_rr_2 }
     //,{ C64X::srl_p_ri,    C64X::srl_ri_1,   C64X::srl_ri_2 }
     //,{ C64X::mpy32_p,     C64X::mpy32_1,    C64X::mpy32_2  }
     // address loads (_sload = data path and FU on the same side)
     //,{ C64X::word_load_p_addr,   C64X::word_load_1,    C64X::word_load_2}
-    ,{ C64X::word_load_p_addr,   C64X::word_sload_1,   C64X::word_sload_2}
+    { C64X::word_load_p_addr,   C64X::word_sload_1,   C64X::word_sload_2}
     ,{ C64X::word_store_p_addr,  C64X::word_store_1,   C64X::word_store_2}
     ,{ C64X::hword_load_p_addr,  C64X::hword_sload_1,  C64X::hword_sload_2}
     ,{ C64X::hword_store_p_addr, C64X::hword_store_1,  C64X::hword_store_2}
@@ -112,6 +112,7 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
      { C64X::mpy32_1,    C64X::mpy32_2 }
     ,{ C64X::add_rr_1,   C64X::add_rr_2 }
     ,{ C64X::add_ri_1,   C64X::add_ri_2 }
+    ,{ C64X::srl_rr_1,   C64X::srl_rr_2 }
     ,{ C64X::srl_ri_1,   C64X::srl_ri_2 }
   };
 
