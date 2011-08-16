@@ -18,15 +18,18 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/ADT/IndexedMap.h"
 
 namespace llvm {
   class MachineBasicBlock;
   class MachineInstr;
+  class TMS320C64XInstrInfo;
 
 class TMS320C64XClusterAssignment : public MachineFunctionPass {
 
   TargetMachine &TM;
-  const TargetInstrInfo *TII;
+  const TMS320C64XInstrInfo *TII;
   const TargetRegisterInfo *TRI;
 
   typedef DenseMap<MachineInstr*, int> assignment_t;
@@ -61,5 +64,13 @@ protected:
   // helpers
   void analyzeInstr(MachineInstr *MI, res_set_t &set) const;
 
+  typedef IndexedMap<const TargetRegisterClass*, VirtReg2IndexFunctor> VirtMap_t;
+  void verifyUses(MachineFunction &MF, VirtMap_t &VirtMap);
+  /*
+  void verifyUses(MachineFunction &MF, MachineInstr *MI, const VirtMap_t &VirtMap,
+                  bool fixConflicts = false);
+                  */
+  void fixUseRC(MachineFunction &MF, MachineInstr *MI, MachineOperand &MO,
+                const TargetRegisterClass *RC);
 };
 }

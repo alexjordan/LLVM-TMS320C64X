@@ -14,6 +14,7 @@
 
 #include "TMS320C64XClusterAssignment.h"
 #include "TMS320C64XInstrInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -22,9 +23,21 @@
 #define DEBUG(x) x
 
 using namespace llvm;
-typedef TMS320C64XInstrInfo C64XII;
+namespace C64XII = TMS320C64XII;
 
 namespace {
+// register class narrowing
+const TargetRegisterClass *resolveRC(const TargetRegisterClass *Actual,
+                                     const TargetRegisterClass *Required) {
+  // restrict to A or B regs if required
+  if (Required == TMS320C64X::ARegsRegisterClass ||
+      Required == TMS320C64X::BRegsRegisterClass)
+    return Required;
+
+  // no restriction when only GP reg class is required
+  assert(Required == TMS320C64X::GPRegsRegisterClass);
+  return Actual;
+}
 
 /// test assignment algorithm - assigns everything possible to B side
 struct BSideAssigner : public TMS320C64XClusterAssignment {
@@ -48,23 +61,125 @@ char TMS320C64XClusterAssignment::ID = 0;
 TMS320C64XClusterAssignment::TMS320C64XClusterAssignment(TargetMachine &tm)
   : MachineFunctionPass(ID)
   , TM(tm)
-  , TII(tm.getInstrInfo())
+  , TII(static_cast<const TMS320C64XInstrInfo*>(tm.getInstrInfo()))
   , TRI(tm.getRegisterInfo())
 {}
 
 bool TMS320C64XClusterAssignment::runOnMachineFunction(MachineFunction &Fn) {
+  MachineRegisterInfo &MRI = Fn.getRegInfo();
+
+  // track vregs with changed register class
+  VirtMap_t VirtMap;
+  VirtMap.resize(MRI.getNumVirtRegs());
+
   for (MachineFunction::iterator I = Fn.begin(), E = Fn.end(); I != E; ++I) {
     Assigned.clear();
     assignBasicBlock(I);
 
+#if 1
     for (assignment_t::iterator AI = Assigned.begin(), AE = Assigned.end();
          AI != AE; ++AI) {
+      MachineInstr *MI = AI->first;
       DEBUG(dbgs() << *AI->first << " assigned to "
-            << C64XII::res2Str(AI->second) << "\n\n");
+            << TII->res2Str(AI->second) << "\n");
+
+      int newOpc = TII->getSideOpcode(MI->getOpcode(), C64XII::BSide);
+      MI->setDesc(TII->get(newOpc));
+
+      for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+        const TargetOperandInfo &TOI = MI->getDesc().OpInfo[i];
+        MachineOperand &MO = MI->getOperand(i);
+
+        if (TOI.isPredicate())
+          break;
+
+        if (!MO.isReg() || !TargetRegisterInfo::isVirtualRegister(MO.getReg()))
+          continue;
+
+        const TargetRegisterClass *RCis =  MRI.getRegClass(MO.getReg());
+        const TargetRegisterClass *RCshould =
+          resolveRC(RCis, TOI.getRegClass(TRI));
+
+        if (RCis != RCshould) {
+          if (MO.isDef()) {
+            DEBUG(dbgs() << "RC change for "<< PrintReg(MO.getReg()) << ": "
+                  << RCis->getName() << " -> " << RCshould->getName() << "\n");
+            MRI.setRegClass(MO.getReg(), RCshould);
+            VirtMap[MO.getReg()] = RCshould;
+          } else {
+            fixUseRC(Fn, MI, MO, RCshould);
+            VirtMap.resize(MRI.getNumVirtRegs());
+          }
+        }
+      }
+
+      DEBUG(dbgs() << "-- end assignment --\n");
     }
+#endif
   }
 
+  verifyUses(Fn, VirtMap);
+
   return true;
+}
+
+void TMS320C64XClusterAssignment::verifyUses(MachineFunction &MF,
+                                             VirtMap_t &VirtMap) {
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
+  for (MachineFunction::iterator I = MF.begin(), E = MF.end(); I != E; ++I) {
+    MachineBasicBlock *MBB = I;
+    for (MachineBasicBlock::iterator MI = MBB->begin(), ME = MBB->end();
+         MI != ME; ++MI) {
+      // skip pseudo MIs
+      if (MI->getOpcode() <= TargetOpcode::COPY)
+        continue;
+
+      for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+        const TargetOperandInfo &TOI = MI->getDesc().OpInfo[i];
+        MachineOperand &MO = MI->getOperand(i);
+
+        if (TOI.isPredicate())
+          break;
+
+        if (!MO.isReg() || !MO.isUse()
+            || !TargetRegisterInfo::isVirtualRegister(MO.getReg()))
+          continue;
+
+        const TargetRegisterClass *RCvreg = VirtMap[MO.getReg()];
+        if (!RCvreg)
+          continue;
+
+        const TargetRegisterClass *RCtgt =
+          resolveRC(RCvreg, TOI.getRegClass(TRI));
+
+        if (RCvreg != RCtgt) {
+          DEBUG(dbgs() << *MI);
+          DEBUG(dbgs() << "RCs disagree at operand " << MO
+                << " is: " << RCvreg->getName()
+                << " should: " << RCtgt->getName() << "\n");
+          fixUseRC(MF, MI, MO, RCtgt);
+          VirtMap.resize(MRI.getNumVirtRegs());
+        }
+      }
+    }
+  }
+}
+
+void TMS320C64XClusterAssignment::fixUseRC(MachineFunction &MF,
+                                           MachineInstr *MI,
+                                           MachineOperand &MO,
+                                           const TargetRegisterClass *RC) {
+  // XXX instruction may be commutable
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  unsigned vnew = MRI.createVirtualRegister(RC);
+
+  // insert a copy from the original reg to the new one
+  BuildMI(*MI->getParent(), MachineBasicBlock::iterator(MI),
+          MI->getDebugLoc(), TII->get(TargetOpcode::COPY), vnew)
+    .addReg(MO.getReg());
+  MO.setReg(vnew);
+  DEBUG(dbgs() << "COPY added\n");
 }
 
 void TMS320C64XClusterAssignment::assign(MachineInstr *MI, int res) {
@@ -97,7 +212,7 @@ void TMS320C64XClusterAssignment::analyzeInstr(MachineInstr *MI,
   if (us == 0) {
     unsigned fu = GET_UNIT(flags) << 1;
     fu |= IS_BSIDE(flags) ? 1 : 0;
-    DEBUG(dbgs() << *MI << " fixed to " << C64XII::res2Str(fu)
+    DEBUG(dbgs() << *MI << " fixed to " << TII->res2Str(fu)
                  <<  "\n\n");
     set.insert(fu);
     return;
@@ -109,8 +224,8 @@ void TMS320C64XClusterAssignment::analyzeInstr(MachineInstr *MI,
     if ((us >> i) & 0x1) {
       set.insert(i << 1);
       set.insert((i << 1) + 1);
-      DEBUG(dbgs() << C64XII::res2Str(i << 1) << " "
-            << C64XII::res2Str((i << 1) +1) + " ");
+      DEBUG(dbgs() << TII->res2Str(i << 1) << " "
+            << TII->res2Str((i << 1) +1) + " ");
     }
   }
   DEBUG(dbgs() <<  "\n\n");

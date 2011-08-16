@@ -119,6 +119,7 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
     ,{ C64X::srl_ri_1,       C64X::srl_ri_2 }
 
     ,{ C64X::word_load_1,    C64X::word_load_2 }
+    ,{ C64X::word_store_1,   C64X::word_store_2 }
     ,{ C64X::word_sload_1,   C64X::word_sload_2 }
     ,{ C64X::hword_sload_1,  C64X::hword_sload_2 }
     ,{ C64X::hword_store_1,  C64X::hword_store_2 }
