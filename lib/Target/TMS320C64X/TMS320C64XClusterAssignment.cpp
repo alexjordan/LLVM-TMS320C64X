@@ -19,8 +19,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "llvm/Support/Debug.h"
-#undef DEBUG
-#define DEBUG(x) x
+//#undef DEBUG
+//#define DEBUG(x) x
 
 using namespace llvm;
 namespace C64XII = TMS320C64XII;
