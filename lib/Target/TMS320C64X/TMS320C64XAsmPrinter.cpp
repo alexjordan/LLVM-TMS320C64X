@@ -40,6 +40,7 @@
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -74,6 +75,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
     const char *getRegisterName(unsigned RegNo);
 
     bool handleSoftFloatCall(const char* SymbolName);
+    void refSymbol(MCSymbol *Sym);
 
     bool print_predicate(const MachineInstr *MI,
                          raw_ostream &OS,
@@ -112,6 +114,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
                                raw_ostream &outputStream);
 
     virtual void EmitFunctionBodyStart();
+    virtual void EmitEndOfAsmFile(Module &M);
 };
 
 } // anonymous
@@ -185,9 +188,8 @@ bool TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
 
   for (unsigned i = 0; i < array_lengthof(FPNames); ++i) {
     if (strcmp(SymbolName, FPNames[i]) == 0) {
-      Module *M = const_cast<Module*>(MMI->getModule());
-      M->getOrInsertFunction(SymbolName + 1, // skip underscore at beginning
-                             Type::getVoidTy(M->getContext()), NULL);
+      // don't mangle FP calls, but add to .refs
+      refSymbol(OutContext.GetOrCreateSymbol(StringRef(SymbolName)));
       return true;
     }
   }
@@ -455,19 +457,23 @@ void TMS320C64XAsmPrinter::printOperand(const MachineInstr *MI,
     case MachineOperand::MO_GlobalAddress:
       Mang->getNameWithPrefix(NameStr, MO.getGlobal(), false);
       OS << NameStr;
+      // if GV is an external symbol, it needs a .ref
+      if (MO.getGlobal()->isDeclaration())
+        refSymbol(Mang->getSymbol(MO.getGlobal()));
       break;
 
     case MachineOperand::MO_ExternalSymbol:
       if (MO.getTargetFlags() ||
           handleSoftFloatCall(MO.getSymbolName())) {
-        // the target flag is set, meaning that this is a local label lowered as
-        // an external symbol, or an already mangled call to softfloat function.
-        // leave the symbol/label name as is.
+        // the target flag is set when this is a local label lowered as an
+        // external symbol, leave the symbol/label name as is.
+        // (also for an already mangled call to a softfloat function)
         OS << MO.getSymbolName();
       } else {
         // symbol name needs mangling
         Mang->getNameWithPrefix(NameStr, MO.getSymbolName());
         OS << NameStr;
+        refSymbol(OutContext.GetOrCreateSymbol(StringRef(NameStr)));
       }
       break;
 
@@ -563,8 +569,38 @@ bool TMS320C64XAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 
 //-----------------------------------------------------------------------------
 
-void TMS320C64XAsmPrinter::EmitFunctionBodyStart() {
+void TMS320C64XAsmPrinter::refSymbol(MCSymbol *MCSym) {
+  // we use the obj file info for mach to store externals refs
+  MachineModuleInfoMachO &MMIMachO =
+    MMI->getObjFileInfo<MachineModuleInfoMachO>();
 
+  // skip anything that is defined in the module
+  if (MCSym->isDefined())
+    return;
+
+  MachineModuleInfoImpl::StubValueTy &StubSym = MMIMachO.getFnStubEntry(MCSym);
+  if (StubSym.getPointer() == 0)
+    StubSym = MachineModuleInfoImpl::StubValueTy(MCSym, false);
+}
+
+//-----------------------------------------------------------------------------
+
+void TMS320C64XAsmPrinter::EmitEndOfAsmFile(Module &M) {
+  MachineModuleInfoMachO &MMIMacho =
+    MMI->getObjFileInfo<MachineModuleInfoMachO>();
+  MachineModuleInfoMachO::SymbolListTy Stubs = MMIMacho.GetFnStubList();
+  if (!Stubs.empty())
+    OutStreamer.AddBlankLine();
+
+  // emit as .ref
+  for (unsigned i = 0, e = Stubs.size(); i != e; ++i) {
+    OutStreamer.EmitSymbolAttribute(Stubs[i].first, MCSA_WeakReference);
+  }
+}
+
+//-----------------------------------------------------------------------------
+
+void TMS320C64XAsmPrinter::EmitFunctionBodyStart() {
   const TMS320C64XMachineFunctionInfo *MFI =
     MF->getInfo<TMS320C64XMachineFunctionInfo>();
 
