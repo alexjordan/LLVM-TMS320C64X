@@ -12,10 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "cluster-assignment"
 #include "TMS320C64XClusterAssignment.h"
 #include "TMS320C64XInstrInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "llvm/Support/Debug.h"
@@ -39,6 +42,12 @@ const TargetRegisterClass *resolveRC(const TargetRegisterClass *Actual,
   return Actual;
 }
 
+/// null assignment algorithm - does nothing
+struct NoAssign : public TMS320C64XClusterAssignment {
+  NoAssign(TargetMachine &tm) : TMS320C64XClusterAssignment(tm) {}
+  virtual void assignBasicBlock(MachineBasicBlock *MBB) {}
+};
+
 /// test assignment algorithm - assigns everything possible to B side
 struct BSideAssigner : public TMS320C64XClusterAssignment {
 
@@ -48,9 +57,24 @@ struct BSideAssigner : public TMS320C64XClusterAssignment {
 
   int select(int side, const res_set_t &set);
 };
+
+enum AssignmentAlgorithm {
+  ClusterNone,
+  ClusterB
+};
 }
 
-
+static cl::opt<AssignmentAlgorithm>
+ClusterOpt("c64x-clst",
+  cl::desc("Choose a cluster assignment algorithm"),
+  cl::NotHidden,
+  cl::values(
+    clEnumValN(ClusterNone, "none",
+               "Do not assign clusters"),
+    clEnumValN(ClusterB, "bside",
+               "Assign everything to cluster B"),
+    clEnumValEnd),
+  cl::init(ClusterNone));
 
 //
 // TMS320C64XClusterAssignment implementation
@@ -262,6 +286,10 @@ int BSideAssigner::select(int side, const res_set_t &set) {
 }
 
 FunctionPass *llvm::createTMS320C64XClusterAssignment(TargetMachine &tm) {
-  return new BSideAssigner(tm);
+  switch (ClusterOpt) {
+  default: llvm_unreachable("unknown cluster assignment");
+  case ClusterNone: return new NoAssign(tm);
+  case ClusterB: return new BSideAssigner(tm);
+  }
 }
 
