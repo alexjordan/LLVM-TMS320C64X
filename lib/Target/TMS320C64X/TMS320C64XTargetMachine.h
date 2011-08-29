@@ -34,12 +34,12 @@
 #include "TMS320C64XHazardRecognizer.h"
 #include "TMS320C64XSubtarget.h"
 
-#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/VLIWTargetMachine.h"
 #include "llvm/Target/TargetData.h"
 
 namespace llvm {
 
-class TMS320C64XTargetMachine : public LLVMTargetMachine {
+class TMS320C64XTargetMachine : public VLIWTargetMachine {
 
     const TargetData		DataLayout;
     TMS320C64XInstrInfo		InstrInfo;
@@ -53,7 +53,7 @@ class TMS320C64XTargetMachine : public LLVMTargetMachine {
 
     TMS320C64XTargetMachine(const Target &T,
                             const std::string &TT,
-			    const std::string &FS);
+                            const std::string &FS);
 
     virtual const TargetFrameLowering *getFrameLowering() const {
       return &FrameLowering;
@@ -93,6 +93,9 @@ class TMS320C64XTargetMachine : public LLVMTargetMachine {
 
     virtual bool addInstSelector(PassManagerBase &PM,
 				 CodeGenOpt::Level OptLevel);
+
+    virtual bool addPreRegAlloc(PassManagerBase &PM,
+                                CodeGenOpt::Level);
 
     virtual bool addPostRAScheduler(PassManagerBase &PM,
                                     CodeGenOpt::Level OptLevel);

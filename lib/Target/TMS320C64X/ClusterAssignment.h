@@ -59,7 +59,7 @@ namespace TMS320C64X {
     SmallVector<int,128> Assigned;
     SmallVector<int,128> Cycle;
     DenseMap<const SDNode*,unsigned> Node2Id;
-    IndexedMap<unsigned> ArgMap;
+    IndexedMap<unsigned, VirtReg2IndexFunctor> ArgMap;
 
     // XXX could be SmallBitVector
     typedef SmallVector<BitVector,128> busycycles_t;

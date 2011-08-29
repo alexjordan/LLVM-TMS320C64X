@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "post-RA-sched"
-#define DBGMI(MI) errs() << MI->getDesc().getName() << ": "
+#define PRNTMI(OS, MI) OS << MI->getDesc().getName() << ": "
 
 #include "TMS320C64X.h"
 #include "TMS320C64XHazardRecognizer.h"
@@ -130,18 +130,18 @@ TMS320C64XHazardRecognizer::getHazardType(SUnit *SU, int stalls) {
   unsigned idx = getUnitIndex(SU);
   if (Hzd->isUnitBusy(idx)) {
     static std::string ustr[] = {"L1", "L2", "S1", "S2", "M1", "M2", "D1", "D2"};
-    errs() << ustr[idx] << " conflict\n";
+    DEBUG(dbgs() << ustr[idx] << " conflict\n");
     return NoopHazard;
   }
 
   unsigned xuse = getExtraUse(SU);
   if (Hzd->isXResBusy(xuse)) {
     static std::string estr[] = {"error", "T1", "T2", "X1", "X2"};
-    errs() << estr[xuse] << " conflict\n";
+    DEBUG(dbgs() << estr[xuse] << " conflict\n");
     return NoopHazard;
   }
 
-  DEBUG(errs() << "--no hazard\n");
+  DEBUG(dbgs() << "--no hazard\n");
   return NoHazard;
 }
 
@@ -149,7 +149,7 @@ TMS320C64XHazardRecognizer::getHazardType(SUnit *SU, int stalls) {
 
 void TMS320C64XHazardRecognizer::EmitInstruction(SUnit *SU) {
 
-  DEBUG(errs() << "--emit\n");
+  DEBUG(dbgs() << "--emit\n");
   if (isPseudo(SU))
     return;
 
@@ -164,7 +164,7 @@ void TMS320C64XHazardRecognizer::EmitInstruction(SUnit *SU) {
 
 void TMS320C64XHazardRecognizer::AdvanceCycle() {
 
-  DEBUG(errs() << "--advance\n");
+  DEBUG(dbgs() << "--advance\n");
   Hzd->reset();
 }
 
@@ -189,11 +189,10 @@ unsigned TMS320C64XHazardRecognizer::getUnitIndex(unsigned side, unsigned unit)
 unsigned TMS320C64XHazardRecognizer::getUnitIndex(SUnit *SU) {
   const MachineInstr *MI = SU->getInstr();
 	const TargetInstrDesc desc = MI->getDesc();
-  unsigned unit_support = desc.TSFlags & TMS320C64XII::unit_support_mask;
 
   unsigned side = IS_BSIDE(desc.TSFlags) ? 1 : 0;
 
-  if (unit_support == UNIT_FIXED) {
+  if (!isFlexibleInstruction(desc)) {
     // the unit is hardcoded in the flags
     unsigned unit = GET_UNIT(desc.TSFlags);
     return getUnitIndex(side, unit);
@@ -203,7 +202,7 @@ unsigned TMS320C64XHazardRecognizer::getUnitIndex(SUnit *SU) {
   const MachineOperand &unitOp = MI->getOperand(MI->getNumOperands() - 1);
   return getUnitIndex(side, unitOp.getImm() >> 1);
 
-  //errs() << "s:" << side << " u:" << unit << "\n";
+  //dbgs() << "s:" << side << " u:" << unit << "\n";
 }
 
 //-----------------------------------------------------------------------------
@@ -224,8 +223,8 @@ TMS320C64XHazardRecognizer::analyzeOpRegs(const MachineInstr *MI) {
       if (result.second < 0)
         result.second = regside;
       else if (result.second != regside) {
-        errs() << "operand " << i << " differs from previous in: \n";
-        MI->dump();
+        DEBUG(dbgs() << "operand " << i << " differs from previous in: \n");
+        DEBUG(MI->dump());
         result.first = true;
         break;
       }
@@ -241,10 +240,12 @@ unsigned TMS320C64XHazardRecognizer::getExtraUse(SUnit *SU) {
   const MachineInstr *MI = SU->getInstr();
   const TargetInstrDesc desc = MI->getDesc();
 
-  unsigned unit_support = desc.TSFlags & TMS320C64XII::unit_support_mask;
-
-  if (unit_support == UNIT_FIXED) {
-    assert((desc.TSFlags & TMS320C64XII::is_memaccess) == 0);
+  if (!isFlexibleInstruction(desc)) {
+    // pretend that it uses T1. this might well be wrong, on the other hand all
+    // ld/st instructions should be replaced with their flexible forms anyway.
+    // ie. this only matters when scheduling is on and clustering is off.
+    if (desc.TSFlags & TMS320C64XII::is_memaccess)
+      return TMS320C64X::T1;
 
     // not all instructions play nice
     if (desc.isCall())
@@ -258,9 +259,9 @@ unsigned TMS320C64XHazardRecognizer::getExtraUse(SUnit *SU) {
     if (mixed || ((regside >= 0) && (regside != instside))) {
       xuse = (instside == 0) ? TMS320C64X::X1 : TMS320C64X::X2;
 
-      errs() << "x-resource use for fixed op: ";
-      MI->dump();
-      errs () << "xuse: " << getExtraStr(xuse) << "\n";
+      DEBUG(dbgs() << "x-resource use for fixed op: ");
+      DEBUG(MI->dump());
+      DEBUG(dbgs() << "xuse: " << getExtraStr(xuse) << "\n");
     }
     return xuse;
   }
@@ -289,6 +290,17 @@ bool TMS320C64XHazardRecognizer::isPseudo(SUnit *SU) const {
 
 //-----------------------------------------------------------------------------
 
+bool
+TMS320C64XHazardRecognizer::isFlexibleInstruction( const TargetInstrDesc &tid) {
+  if ((tid.TSFlags & TMS320C64XII::unit_support_mask) != UNIT_FIXED &&
+      (tid.TSFlags & TMS320C64XII::is_side_inst))
+    return true;
+  else
+    return false;
+}
+
+//-----------------------------------------------------------------------------
+
 bool TMS320C64XHazardRecognizer::isMove(SUnit *SU) const {
   return (SU->getInstr()->getOpcode() == TMS320C64X::mv);
 }
@@ -301,9 +313,10 @@ void TMS320C64XHazardRecognizer::fixResources(SUnit *SU) {
 	const TargetInstrDesc desc = MI->getDesc();
   int regside, instside;
 
-  // nothing to do for fixed units
-  if ((desc.TSFlags & TMS320C64XII::unit_support_mask) == UNIT_FIXED)
+  // nothing for fixed units
+  if (!isFlexibleInstruction(desc))
     return;
+
 
   // memory operations
   if (desc.TSFlags & TMS320C64XII::is_memaccess) {
@@ -356,8 +369,8 @@ void TMS320C64XHazardRecognizer::setXPath(MachineInstr *MI, bool set) const {
 
   const TargetInstrDesc desc = MI->getDesc();
 
-  if ((desc.TSFlags & TMS320C64XII::unit_support_mask) == UNIT_FIXED) {
-    DBGMI(MI) << "cannot set XPATH, fixed instruction\n";
+  if (!isFlexibleInstruction(desc)) {
+    DEBUG(PRNTMI(dbgs(), MI) << "cannot set XPATH, fixed instruction\n");
     return;
   }
 
@@ -367,7 +380,7 @@ void TMS320C64XHazardRecognizer::setXPath(MachineInstr *MI, bool set) const {
   unsigned oldval = op.getImm() & 0x1;
   unsigned newval = set ? 0x1 : 0x0;
   if (oldval != newval) {
-    DBGMI(MI) << "XPATH set to: " << newval << "\n";
+    DEBUG(PRNTMI(dbgs(), MI) << "XPATH set to: " << newval << "\n");
     op.setImm((op.getImm() & ~0x1) | newval);
   }
 }
@@ -386,18 +399,18 @@ TMS320C64XHazardRecognizer::analyzeMove(SUnit *SU) {
   int srcside = TMS320C64X::BRegsRegClass.contains(src.getReg()) ? 1 : 0;
   int dstside = TMS320C64X::BRegsRegClass.contains(dst.getReg()) ? 1 : 0;
 
-  errs() << "mv x-use for: ";
-  MI->dump();
-  errs() << MI->getDesc().getName() << ": src -> dst = "
+  DEBUG(dbgs() << "mv x-use for: ");
+  DEBUG(MI->dump());
+  DEBUG(dbgs() << MI->getDesc().getName() << ": src -> dst = "
     << (TMS320C64X::BRegsRegClass.contains(src.getReg())?"B":"A")
     << " -> "
     << (TMS320C64X::BRegsRegClass.contains(dst.getReg())?"B":"A")
-    << "\n";
+    << "\n");
 
   unsigned xuse = 0;
   if (srcside != dstside) {
     xuse = (dstside == 0) ? TMS320C64X::X1 : TMS320C64X::X2;
-    errs () << "mv xuse: " << getExtraStr(xuse) << "\n";
+    DEBUG(dbgs() << "mv xuse: " << getExtraStr(xuse) << "\n");
   }
 
   return std::make_pair(dstside, xuse);
@@ -412,12 +425,12 @@ TMS320C64XHazardRecognizer::getMoveHazard(SUnit *SU) const {
   tie(side, xuse) = analyzeMove(SU);
   if (Hzd->isXResBusy(xuse)) {
     static std::string estr[] = {"error", "T1", "T2", "X1", "X2"};
-    errs() << "mv " << estr[xuse] << " conflict\n";
+    DEBUG(dbgs() << "mv " << estr[xuse] << " conflict\n");
     return NoopHazard;
   }
 
   if (!Hzd->moveUnitsAvailable(side)) {
-    errs() << "mv conflict: no units left.\n";
+    DEBUG(dbgs() << "mv conflict: no units left.\n");
     return NoopHazard;
   }
 

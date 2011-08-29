@@ -277,6 +277,8 @@ void SUnit::ComputeHeight() {
 /// SUnit - Scheduling unit. It's an wrapper around either a single SDNode or
 /// a group of nodes flagged together.
 void SUnit::dump(const ScheduleDAG *G) const {
+  if (!Node && !Instr)
+    return; // don't dump placeholder SUs
   dbgs() << "SU(" << NodeNum << "): ";
   G->dumpNode(this);
 }
@@ -380,13 +382,21 @@ void ScheduleDAG::VerifySchedule(bool isBottomUp) {
       }
     }
   }
-  for (unsigned i = 0, e = Sequence.size(); i != e; ++i)
-    if (!Sequence[i])
-      ++Noops;
+  Noops = countNoops(Sequence);
+
   assert(!AnyNotSched);
   assert(Sequence.size() + DeadNodes - Noops == SUnits.size() &&
          "The number of nodes scheduled doesn't match the expected number!");
 }
+
+unsigned ScheduleDAG::countNoops(const std::vector<SUnit*> &Sequence) const {
+  unsigned Noops = 0;
+  for (unsigned i = 0, e = Sequence.size(); i != e; ++i)
+    if (!Sequence[i])
+      ++Noops;
+  return Noops;
+}
+
 #endif
 
 /// InitDAGTopologicalSorting - create the initial topological

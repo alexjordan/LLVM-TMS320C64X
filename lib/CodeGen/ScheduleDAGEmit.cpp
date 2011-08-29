@@ -32,6 +32,10 @@ void ScheduleDAG::EmitNoop() {
   TII->insertNoop(*BB, InsertPos);
 }
 
+void ScheduleDAG::EmitBundleEnd() {
+  TII->insertBundleEnd(*BB, InsertPos);
+}
+
 void ScheduleDAG::EmitPhysRegCopy(SUnit *SU,
                                   DenseMap<SUnit*, unsigned> &VRBaseMap) {
   for (SUnit::const_pred_iterator I = SU->Preds.begin(), E = SU->Preds.end();

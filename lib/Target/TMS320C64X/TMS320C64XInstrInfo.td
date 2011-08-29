@@ -187,9 +187,10 @@ def noop : inst<(outs), (ins i32imm:$cycles), "nop\t\t$cycles", [],
 
 // Shifts and rotates
 
-let Supported = units_s in {
-def srl_p_rr : pseudo_rr<"shru", ".S1", unit_s, srl, 0>;
-def srl_p_ri : pseudo_ri<"shru", ".S1", (i32 uconst5:$imm), unit_s, srl, 0>;
+let Supported = units_fixed in {
+// moved to flexible encoding
+//def srl_p_rr : pseudo_rr<"shru", ".S1", unit_s, srl, 0>;
+//def srl_p_ri : pseudo_ri<"shru", ".S1", (i32 uconst5:$imm), unit_s, srl, 0>;
 }
 def shl_p_rr : pseudo_rr<"shl", ".S1", unit_s, shl, 0>;
 def shl_p_ri : pseudo_ri<"shl", ".S1", (i32 uconst5:$imm), unit_s, shl, 0>;
@@ -205,9 +206,10 @@ def rotl_p_ri : pseudo_ri<"rotl", ".M1", (i32 uconst5:$imm), unit_m, rotl, 0>;
 // and a constant.
 // XXX - for unit D, depending on the form the constant can be sign extended
 // or zero extended; potential for datasheet bugs or data entry bugs here
-let Supported = units_notm in {
-def add_p_rr : pseudo_rr<"add", ".L1", unit_l, add, 0>;
-def add_p_ri : pseudo_ri<"add", ".L1", (i32 sconst5:$imm), unit_l, add, 0>;
+let Supported = units_fixed in {
+// moved to flexible encoding
+//def add_p_rr : pseudo_rr<"add", ".L1", unit_l, add, 0>;
+//def add_p_ri : pseudo_ri<"add", ".L1", (i32 sconst5:$imm), unit_l, add, 0>;
 }
 
 let Constraints = "$src1 = $dst", AsmString = "addk\t.S1\t$imm,\t$dst" in {
@@ -251,12 +253,14 @@ def epilog : inst<(outs), (ins), "", [], 0, unit_s> {
 
 // NB: mpy32 is c64x+ only
 
-let DelaySlots = 3,
-    hasDelaySlot = 1,
-    Itinerary = Multiply,
-    Supported = units_m in {
-def mpy32_p : pseudo_rr<"mpy32", ".M1", unit_m, mul, 0>;
-}
+// moved to flexible encoding
+//let DelaySlots = 3,
+//    hasDelaySlot = 1,
+//    Itinerary = Multiply,
+//    Supported = units_m in {
+//def mpy32_p : pseudo_rr<"mpy32", ".M1", unit_m, mul, 0>;
+//}
+//
 
 ///////////////////////////////////////////////////////////////////////////////
 // MOVE instructions                                                         //
@@ -345,7 +349,7 @@ def : Pat<(call_return_label_node texternalsym:$label),
 // FIXME: Work out what on earth to do with lea
 def lea_fail : inst<(outs ARegs:$dst), (ins mem_operand:$ptr),
                 "add\t.L1\t$ptr,\t$dst",
-                [(set ARegs:$dst, idxaddr:$ptr)],
+                [(set ARegs:$dst, addr:$ptr)],
                 0, unit_l> {
         let Pattern = sched_pattern;
 }
@@ -358,19 +362,20 @@ let MemShift = 0 in {
 defm u_i1 : meminst_load_p<"bu", zextloadi1>;
 }
 
-let MemShift = 0 in {
-defm byte : meminst_p<"b", sextloadi8, truncstorei8>;
-defm ubyte : meminst_load_p<"bu", zextloadi8>;
-}
-
-let MemShift = 1 in {
-defm hword : meminst_p<"h", sextloadi16, truncstorei16>;
-defm uhword : meminst_load_p<"hu", zextloadi16>;
-}
-
-let MemShift = 2 in {
-defm word : meminst_p<"w", load, store>;
-}
+// all moved to flexible encoding
+//let MemShift = 0 in {
+//defm byte : meminst_p<"b", sextloadi8, truncstorei8>;
+//defm ubyte : meminst_load_p<"bu", zextloadi8>;
+//}
+//
+//let MemShift = 1 in {
+//defm hword : meminst_p<"h", sextloadi16, truncstorei16>;
+//defm uhword : meminst_load_p<"hu", zextloadi16>;
+//}
+//
+//let MemShift = 2 in {
+//defm word : meminst_p<"w", load, store>;
+//}
 
 // Comparisons
 
@@ -425,6 +430,7 @@ def : Pat<(tmsselect GPRegs:$false, GPRegs:$true, timm:$trueimm, predwrapper1:$t
 // since there is a way of a branch being predicated, will check again later
 
 let isBranch = 1,
+    Itinerary = Branch,
     isTerminator = 1,
     DelaySlots = 5,
     hasDelaySlot = 1 in
@@ -525,18 +531,22 @@ def ret : inst<(outs), (ins), "b\t.S2\tB3", [(retflag)], 1, unit_s> {
   let DelaySlots = 5;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// side-specific instructions                                                //
+///////////////////////////////////////////////////////////////////////////////
+
 let Supported = units_notm in {
-  defm add_rr : c64inst<(ins GPRegs:$src2), "add">;
-  defm add_ri : c64iinst<(ins i32imm:$src2), "add">;
+  defm add_rr : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), add, l_form, "add">;
+  defm add_ri : c64ri<(i32 sconst5:$src2), (ins i32imm:$src2), add, l_form, "add">;
 }
 
 let Supported = units_s in {
-  defm srl_rr : c64swinst<(ins GPRegs:$src1), "shru">;
-  defm srl_ri : c64iinst<(ins i32imm:$src2), "shru">;
+  defm srl_rr : c64swp<(i32 GPRegs:$src1), (ins GPRegs:$src1), srl, s_form, "shru">;
+  defm srl_ri : c64ri<(i32 uconst5:$src2), (ins i32imm:$src2), srl, s_form, "shru">;
 }
 
 // NKIM, not sure whether this works properly
-let InOperandList = (ins i32imm:$src2, pred:$s, form:$fu),
+let InOperandList = (ins i32imm:$src2, pred:$s, default_form:$fu),
     AsmString = "mvk\t.$fu\t$src2,\t$dst",
     Supported = units_s in {
   defm mvk : c64inst<(ins), "mvk">;
@@ -554,23 +564,23 @@ let DelaySlots = 3,
     hasDelaySlot = 1,
     Itinerary = Multiply,
     Supported = units_m in {
-  defm mpy32 : c64inst<(ins GPRegs:$src2), "mpy32">;
+  defm mpy32 : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), mul, m_form, "mpy32">;
 }
 
 let MemShift = 0 in {
-  defm byte  : c64strictload<"b">;
-  defm byte  : c64store<"b">;
-  defm ubyte : c64strictload<"bu">;
+  defm byte  : c64strictload<"b", sextloadi8>;
+  defm byte  : c64store<"b", truncstorei8>;
+  defm ubyte : c64strictload<"bu", zextloadi8>;
 }
 
 let MemShift = 1 in {
-  defm hword  : c64strictload<"h">;
-  defm hword  : c64store<"h">;
-  defm uhword : c64strictload<"hu">;
+  defm hword  : c64strictload<"h", sextloadi16>;
+  defm hword  : c64store<"h", truncstorei16>;
+  defm uhword : c64strictload<"hu", zextloadi16>;
 }
 
 let MemShift = 2 in {
   defm word : c64load<"w">;
-  defm word : c64strictload<"w">;
-  defm word : c64store<"w">;
+  defm word : c64strictload<"w", load>;
+  defm word : c64store<"w", store>;
 }

@@ -66,6 +66,31 @@ def unit_s      : InstUnit<1>;
 def unit_m      : InstUnit<2>;
 def unit_d      : InstUnit<3>;
 
+// the form operand used to define flexible parts of an instruction.
+// note: it does NOT define the cluster side, separate instructions are
+// generated so that appropriate register classes can be used.
+class InstructionForm<dag OpTypes, int default>
+  : OptionalDefOperand<OtherVT, OpTypes, (ops (i32 default))> {
+  let PrintMethod = "printFU";
+}
+
+// maps units to the encoding of the instruction form operand used in flexible
+// instructions.
+class FormEncoding<InstUnit iu> {
+  // a 3-bit immediate where the upper 2 bits encode the functional unit and the
+  // rightmost bit signals use of the xpath (datapath for loads/stores)
+  bits<3> imm = 0;
+  let imm{2-1} = iu.unit;
+}
+
+// the following can be used to define default units per instruction
+def default_form : InstructionForm<(ops timm), -1>;
+def l_form : InstructionForm<(ops timm), FormEncoding<unit_l>.imm>;
+def s_form : InstructionForm<(ops timm), FormEncoding<unit_s>.imm>;
+def m_form : InstructionForm<(ops timm), FormEncoding<unit_m>.imm>;
+def d_form : InstructionForm<(ops timm), FormEncoding<unit_d>.imm>;
+
+
 // here is me not being able to cast int to bit...
 class InstSide<int si, bit sb> {
   int intval = si;
@@ -81,8 +106,10 @@ def mem_operand	: Operand<i32> {
 }
 
 // NKIM, for the time being we require the root-node to be supplied
-def addr : ComplexPattern<i32, 2, "select_addr", [], [SDNPWantRoot]>;
-def idxaddr : ComplexPattern<i32, 2, "select_idxaddr", [frameindex], [SDNPWantRoot]>;
+def addr : ComplexPattern<i32, 2, "select_addr", [frameindex], [SDNPWantRoot]>;
+
+// AJO: let select_addr defer to select_idxaddr internally (no more _idx instrs)
+//def idxaddr : ComplexPattern<i32, 2, "select_idxaddr", [frameindex], [SDNPWantRoot]>;
 
 def uconst4_xform : SDNodeXForm<imm, [{
 	return CurDAG->getTargetConstant((int)N->getSExtValue(), MVT::i32);
@@ -208,14 +235,16 @@ class inst<dag outops,
   // default unit for 'mobile' (not units_fixed) instructions, otherwise
   // the single legal unit.
   InstUnit DefaultUnit = u;
+  bit SideInst = 0; // no, this is a fixed/pseudo-fixed inst
 
-  let TSFlags{0-3} = Supported.units; // unit support
+  let TSFlags{3-0} = Supported.units; // unit support
   let TSFlags{4} = side; // cluster side (0: A, 1: B)
   let TSFlags{7-5} = DelaySlots; // (range: [0,5])
   let TSFlags{8} = MemAccess; // (instr is load/store)
   let TSFlags{10-9} = MemShift; // mem_shift_amt (XXX)
   let TSFlags{11} = MemLoadStore; // (0 for load, 1 for store)
   let TSFlags{13-12} = DefaultUnit.unit; // fixed/default unit
+  let TSFlags{14} = SideInst; // inst or c64sideinst
 }
 
 class pseudoinst<dag outops, dag inops, string asm, list<dag> pat>
@@ -394,7 +423,7 @@ multiclass meminst_load_p<string mnemonic, PatFrag op> {
   }
 
   def _load_p_idx : memload<(outs GPRegs:$dst), (ins mem_operand:$ptr),
-                    [(set GPRegs:$dst, (op idxaddr:$ptr))], 0, unit_d>
+                    [(set GPRegs:$dst, (op addr:$ptr))], 0, unit_d>
   {
     let Pattern = sched_pattern;
     let AsmString = !strconcat("ld",!strconcat(mnemonic, "\t\t$ptr,\t$dst"));
@@ -411,7 +440,7 @@ multiclass meminst_store_p<string mnemonic, PatFrag op> {
   }
 
   def _store_p_idx : memstore<(outs), (ins mem_operand:$ptr, GPRegs:$reg),
-                     [(op GPRegs:$reg, idxaddr:$ptr)], 0, unit_d>
+                     [(op GPRegs:$reg, addr:$ptr)], 0, unit_d>
   {
     let Pattern = sched_pattern;
     let AsmString = !strconcat("st",!strconcat(mnemonic, "\t\t$reg,\t$ptr"));
@@ -422,16 +451,9 @@ multiclass meminst_p<string mnemonic, PatFrag loadop, PatFrag storeop> :
   meminst_load_p<mnemonic, loadop>,
   meminst_store_p<mnemonic, storeop>;
 
-//
-// side-specific instructions
-//
-
-class InstructionFormat<dag OpTypes> : Operand<OtherVT> {
-  let MIOperandInfo = OpTypes;
-  let PrintMethod = "printFU";
-}
-
-def form : InstructionFormat<(ops timm)>;
+///////////////////////////////////////////////////////////////////////////////
+// side-specific instructions                                                //
+///////////////////////////////////////////////////////////////////////////////
 
 class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
 : Instruction
@@ -440,10 +462,10 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   let isPredicable = 1;
   let CodeSize = 4;
 
-  let Namespace = "C64X"; // XXX this seems to have no effect
+  let Namespace = "TMS320C64X";
 
   let OutOperandList = outops;
-  let InOperandList = !con(inops, (ins pred:$s, form:$fu));
+  let InOperandList = !con(inops, (ins pred:$s, default_form:$fu));
 
   let Itinerary = Default;
   let neverHasSideEffects = 1;
@@ -460,14 +482,23 @@ class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
   bits<2> MemShift = 0;
   bit MemLoadStore = 0;
   InstUnit DefaultUnit = InstUnit<0>; // not used for this inst kind
+  bit SideInst = 1; // yes this is a flexible c64sideinst
 
-  let TSFlags{0-3} = Supported.units; // unit support
+  let TSFlags{3-0} = Supported.units; // unit support
   let TSFlags{4} = side.bitval; // cluster side (0: A, 1: B)
   let TSFlags{7-5} = DelaySlots; // (range: [0,5])
   let TSFlags{8} = MemAccess; // (instr is load/store)
   let TSFlags{10-9} = MemShift; // mem_shift_amt (XXX)
   let TSFlags{11} = MemLoadStore; // (0 for load, 1 for store)
   let TSFlags{13-12} = DefaultUnit.unit; // fixed/default unit
+  let TSFlags{14} = SideInst; // inst or c64sideinst
+}
+
+class c64new<dag outops, dag inops, string mnemonic, InstructionForm format,
+             InstSide side>
+    : c64sideinst<outops, inops, mnemonic, side> {
+
+  let InOperandList = !con(inops, (ins pred:$s, format:$fu));
 }
 
 multiclass c64inst<dag indag, string mnemonic> {
@@ -477,22 +508,38 @@ multiclass c64inst<dag indag, string mnemonic> {
     mnemonic, side_b>;
 }
 
+multiclass c64rr<dag inDag, dag inOp, SDNode op, InstructionForm default,
+                 string mnemonic> {
+  def _1 : c64new<(outs ARegs:$dst), !con((ins ARegs:$src1), inOp),
+                  mnemonic, default, side_a> {
+    let Pattern = [(set ARegs:$dst, (op ARegs:$src1, inDag))];
+  }
+  def _2 : c64new<(outs BRegs:$dst), !con((ins BRegs:$src1), inOp),
+                  mnemonic, default, side_b>;
+}
+
 // immediate version ($src2 is the immediate and and $src1 supports xpath)
-multiclass c64iinst<dag indag, string mnemonic> {
-        def _1 : c64sideinst<(outs ARegs:$dst), !con((ins GPRegs:$src1), indag),
-    mnemonic, side_a>;
-        def _2 : c64sideinst<(outs BRegs:$dst), !con((ins GPRegs:$src1), indag),
-    mnemonic, side_b>;
+multiclass c64ri<dag inDag, dag inOp, SDNode op, InstructionForm default,
+                 string mnemonic> {
+  def _1 : c64new<(outs ARegs:$dst), !con((ins GPRegs:$src1), inOp),
+                       mnemonic, default, side_a> {
+    let Pattern = [(set ARegs:$dst, (op GPRegs:$src1, inDag))];
+  }
+  def _2 : c64new<(outs BRegs:$dst), !con((ins GPRegs:$src1), inOp),
+                       mnemonic, default, side_b>;
 }
 
 // swapped version (src operands swapped for added confusion)
 // used by instructions like shift: (TI's ASM reference) src2, src1, dst.
 // LLVM has the src ops swapped and therefore $src2 must be side-fixed.
-multiclass c64swinst<dag indag, string mnemonic> {
-        def _1 : c64sideinst<(outs ARegs:$dst), !con(indag, (ins ARegs:$src2)),
-    mnemonic, side_a>;
-        def _2 : c64sideinst<(outs BRegs:$dst), !con(indag, (ins BRegs:$src2)),
-    mnemonic, side_b>;
+multiclass c64swp<dag inDag, dag inOp, SDNode op, InstructionForm default,
+                  string mnemonic> {
+  def _1 : c64new<(outs ARegs:$dst), !con(inOp, (ins ARegs:$src2)),
+                  mnemonic, default, side_a> {
+    let Pattern = [(set ARegs:$dst, (op inDag, ARegs:$src2))];
+  }
+  def _2 : c64new<(outs BRegs:$dst), !con(inOp, (ins BRegs:$src2)),
+                  mnemonic, default, side_b>;
 }
 
 // side-specific load/store
@@ -508,7 +555,7 @@ def mem_op_b: Operand<i32> {
 }
 
 class c64sideload<dag indag, dag outdag, string load, InstSide side> :
-        c64sideinst<outdag, indag, "", side> {
+        c64new<outdag, indag, "", d_form, side> {
   let DelaySlots = 4;
   let hasDelaySlot = 1;
   let MemAccess = 1;
@@ -523,7 +570,7 @@ class c64sideload<dag indag, dag outdag, string load, InstSide side> :
 }
 
 class c64sidestore<dag indag, string store, InstSide side> :
-        c64sideinst<(outs), !con(indag, (ins GPRegs:$reg)), "", side> {
+        c64new<(outs), !con(indag, (ins GPRegs:$reg)), "", d_form, side> {
   let MemAccess = 1;
   let MemLoadStore = 1;
   let mayStore = 1;
@@ -535,17 +582,22 @@ class c64sidestore<dag indag, string store, InstSide side> :
         "\t.$fu\t$reg,\t$ptr"));
 }
 
+// non-restricted loads (not used in ISel)
 multiclass c64load<string width> {
   def _load_1 : c64sideload<(ins mem_op_a:$ptr), (outs GPRegs:$dst), width, side_a>;
   def _load_2 : c64sideload<(ins mem_op_b:$ptr), (outs GPRegs:$dst), width, side_b>;
 }
 
-multiclass c64strictload<string width> {
-  def _sload_1 : c64sideload<(ins mem_op_a:$ptr), (outs ARegs:$dst), width, side_a>;
+multiclass c64strictload<string width, PatFrag op> {
+  def _sload_1 : c64sideload<(ins mem_op_a:$ptr), (outs ARegs:$dst), width, side_a> {
+    let Pattern = [(set ARegs:$dst, (op addr:$ptr))];
+  }
   def _sload_2 : c64sideload<(ins mem_op_b:$ptr), (outs BRegs:$dst), width, side_b>;
 }
 
-multiclass c64store<string width> {
-  def _store_1 : c64sidestore<(ins mem_op_a:$ptr), width, side_a>;
+multiclass c64store<string width, PatFrag op> {
+  def _store_1 : c64sidestore<(ins mem_op_a:$ptr), width, side_a> {
+    let Pattern = [(op GPRegs:$reg, addr:$ptr)];
+  }
   def _store_2 : c64sidestore<(ins mem_op_b:$ptr), width, side_b>;
 }

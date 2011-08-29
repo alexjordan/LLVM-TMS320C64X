@@ -8,16 +8,18 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Implements BUG (bottom-up-greedy) alike cluster assignment for the 
+// Implements BUG (bottom-up-greedy) alike cluster assignment for the
 // TMS320C64X.
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "cluster-assignment"
 #include "ClusterAssignment.h"
 #include "DAGHelper.h"
 #include "TMS320C64XRegisterInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/Support/Debug.h"
 
 using namespace llvm;
 using namespace TMS320C64X;
@@ -194,7 +196,7 @@ void TMS320C64X::ClusterBug::run() {
 
   for (MachineRegisterInfo::livein_iterator LI = MRI.livein_begin(),
        LE = MRI.livein_end(); LI != LE; ++LI) {
-    errs() << "v" << LI->second << " -> arg-" << TRI->getName(LI->first) << "\n";
+    DEBUG(dbgs() << "v" << LI->second << " -> arg-" << TRI->getName(LI->first) << "\n");
     ArgMap[LI->second] = LI->first;
   }
 
@@ -202,14 +204,14 @@ void TMS320C64X::ClusterBug::run() {
   EntryNode = Dag->getEntryNode().getNode();
   SDNode *root = Dag->getRoot().getNode();
   if (root->isMachineOpcode() && root->getMachineOpcode() == ret) {
-    errs() << "skipping ret node\n";
+    DEBUG(dbgs() << "skipping ret node\n");
     root = root->getOperand(2).getNode();
   }
   Roots.insert(root);
 
   // we may discover more root nodes by following chains
   while (Roots.size()) {
-    errs() << "root nodes left: " << Roots.size() << "\n";
+    DEBUG(dbgs() << "root nodes left: " << Roots.size() << "\n");
     SDNode *N = *Roots.begin();
     Roots.erase(N);
     // start with an empty set (ie. all units allowed)
@@ -231,18 +233,18 @@ int ClusterBug::getUnit(const SDNode *N) const {
 
 res_cycle_t ClusterBug::assign(const SDNode *N, const res_set_t &dest) {
   if (N == EntryNode) {
-    errs() << "reached entry\n";
+    DEBUG(dbgs() << "reached entry\n");
     return unassigned;
   }
 
   assert((unsigned) N->getNodeId() < Assigned.size());
   if (Assigned[N->getNodeId()] >= 0) {
-    errs() << "node[" << N->getNodeId() << "] already assigned\n";
+    DEBUG(dbgs() << "node[" << N->getNodeId() << "] already assigned\n");
     return std::make_pair(Assigned[N->getNodeId()], Cycle[N->getNodeId()]);
   }
 
-  errs() << DbgNode(N, Dag) << "assigning... (" << N->getNumOperands()
-    << " operand(s))\n";
+  DEBUG(dbgs() << DbgNode(N, Dag) << "assigning... (" << N->getNumOperands()
+    << " operand(s))\n");
 
   // static FU restriction (based on instruction)
   res_set_t likelyFUs;
@@ -267,10 +269,10 @@ res_cycle_t ClusterBug::assign(const SDNode *N, const res_set_t &dest) {
   // update likely with the now fixed operands
   likely(N, opAssigned, likelyFUs, likelyCycles);
 
-  errs() << DbgNode(N, Dag) << "op FUs " << DbgRC(opAssigned)
-         << ", dest FUs " << DbgSet(dest)
-         << ", likely FUs " << DbgSet(likelyFUs)
-         << ", likely cycles " << DbgCycles(likelyCycles) << "\n";
+  DEBUG(dbgs() << DbgNode(N, Dag) << "op FUs " << DbgRC(opAssigned)
+               << ", dest FUs " << DbgSet(dest)
+               << ", likely FUs " << DbgSet(likelyFUs)
+               << ", likely cycles " << DbgCycles(likelyCycles) << "\n");
 
   // assign
   res_cycle_t selected = select(likelyFUs, likelyCycles);
@@ -280,7 +282,7 @@ res_cycle_t ClusterBug::assign(const SDNode *N, const res_set_t &dest) {
   // mark FU busy at cycle
   bookCycle(N, selected);
 
-  errs() << DbgNode(N, Dag) << "assigned to " << selected << "\n";
+  DEBUG(dbgs() << DbgNode(N, Dag) << "assigned to " << selected << "\n");
 
   // return the completion cycle
   return std::make_pair(selected.first, selected.second + DagH.getLatency(N));
@@ -302,7 +304,7 @@ void ClusterBug::likely(const SDNode *N, const op_list_t &ops,
   for (unsigned i = 0; i < fus.size(); ++ i) {
     int cycle = start;
     while (Busy[cycle].test(fus[i])) {
-      errs() << print(N) << res2Char(fus[i]) << " busy @ " << cycle << "\n";
+      DEBUG(dbgs() << print(N) << res2Char(fus[i]) << " busy @ " << cycle << "\n");
       cycle++;
     }
     cycles[i] = cycle;
@@ -323,7 +325,7 @@ res_set_t ClusterBug::likelyCopyToReg(const SDNode *N) {
   // mv is supported by all FUs
   addAllFUs(l, DestSide);
 
-  errs() << DbgNode(N, Dag) << "restricted to " << DbgSet(l) << "\n";
+  DEBUG(dbgs() << DbgNode(N, Dag) << "restricted to " << DbgSet(l) << "\n");
   return l;
 }
 
@@ -341,8 +343,8 @@ res_set_t ClusterBug::likelyCopyFromReg(const SDNode *N) {
 
   addAllFUs(l, side);
 
-  errs() << DbgNode(N, Dag) << "(arg " << TRI->getName(SourceReg) << ") "
-    << "restricted to " << DbgSet(l) << "\n";
+  DEBUG(dbgs() << DbgNode(N, Dag) << "(arg " << TRI->getName(SourceReg) << ") "
+    << "restricted to " << DbgSet(l) << "\n");
   return l;
 }
 
@@ -357,7 +359,7 @@ res_set_t ClusterBug::subtractBusy(const SDNode *N, const res_set_t &s) {
   for (res_set_t::iterator I = s.begin(), E = s.end(); I != E; ++I) {
     unsigned cycle = DagH.getDepth(N);
     if (Busy[cycle].test(*I))
-      errs() << print(N) << res2Char(*I) << " busy @ " << cycle << "\n";
+      DEBUG(dbgs() << print(N) << res2Char(*I) << " busy @ " << cycle << "\n");
     else
       result.insert(*I);
   }
@@ -391,8 +393,8 @@ void ClusterBug::initSupported(const SDNode *N, res_set_t &set) {
   if (us == 0) {
     unsigned fu = GET_UNIT(flags) << 1;
     fu |= IS_BSIDE(flags) ? 1 : 0;
-    errs() << N->getOperationName(Dag) << " fixed to " << res2Char(fu)
-           <<  "\n";
+    DEBUG(dbgs() << N->getOperationName(Dag) << " fixed to " << res2Char(fu)
+                 <<  "\n");
     set.insert(fu);
     return;
   }
@@ -402,8 +404,8 @@ void ClusterBug::initSupported(const SDNode *N, res_set_t &set) {
     if ((us >> i) & 0x1) {
       set.insert(i << 1);
       set.insert((i << 1) + 1);
-      errs() << "(" << res2Char(i << 1) << "," << res2Char((i << 1) +1)
-        << ") supported by " << N->getOperationName(Dag) << "\n";
+      DEBUG(dbgs() << "(" << res2Char(i << 1) << "," << res2Char((i << 1) +1)
+                   << ") supported by " << N->getOperationName(Dag) << "\n");
     }
   }
 }
@@ -420,7 +422,7 @@ res_set_t ClusterBug::subtractUnsupported(const SDNode *N, const res_set_t &s) {
   if (us == 0) {
     unsigned fu = GET_UNIT(flags) << 1;
     fu |= GET_SIDE(flags);
-    errs() << N->getOperationName(Dag) << " fixed to " << res2Char(fu)
+    dbgs() << N->getOperationName(Dag) << " fixed to " << res2Char(fu)
            <<  "\n";
     res_set_t result;
     result.insert(fu);
@@ -440,7 +442,7 @@ res_set_t ClusterBug::subtractUnsupported(const SDNode *N, const res_set_t &s) {
     if ((us >> (*I >> 1)) & 1)
       result.insert(*I);
     else
-      errs() << res2Char(*I) << " not supported by "
+      dbgs() << res2Char(*I) << " not supported by "
              << N->getOperationName(Dag) << "\n";
   }
   return result;
@@ -450,7 +452,7 @@ res_set_t ClusterBug::subtractUnsupported(const SDNode *N, const res_set_t &s) {
 res_set_t ClusterBug::restrictToSide(const res_set_t &s, int side) {
   if (sideOfRes(s) >= 0) {
     if (side != sideOfRes(s))
-      errs() << "already restricted to other side\n";
+      DEBUG(dbgs() << "already restricted to other side\n");
     return s;
   }
 
@@ -459,7 +461,7 @@ res_set_t ClusterBug::restrictToSide(const res_set_t &s, int side) {
     if ((*I & 0x1) == side)
       result.insert(*I);
   }
-  errs() << "restricted to side " << side2Char(side) << "\n";
+  DEBUG(dbgs() << "restricted to side " << side2Char(side) << "\n");
   return result;
 }
 
@@ -477,8 +479,8 @@ void ClusterBug::bookCycle(const SDNode *N, const res_cycle_t &rc) {
   }
 
   Busy[rc.second].set(rc.first);
-  errs() << print(N) << "books resource " << res2Char(rc.first)
-    << " @ " << rc.second << "\n";
+  DEBUG(dbgs() << print(N) << "books resource " << res2Char(rc.first)
+    << " @ " << rc.second << "\n");
 }
 
 bool ClusterBug::filterOperand(const SDNode *N, const SDValue &opval,
@@ -498,7 +500,7 @@ bool ClusterBug::filterOperand(const SDNode *N, const SDValue &opval,
     // also skip (hidden) chain operand but assign the chain later on
     if (opval.getValueType() == MVT::Other) {
       Roots.insert(opval.getNode());
-      errs() << DbgNode(opval.getNode(), Dag) << "added to roots\n";
+      DEBUG(dbgs() << DbgNode(opval.getNode(), Dag) << "added to roots\n");
       return true;
     }
     // just skip any flags
@@ -523,7 +525,7 @@ bool ClusterBug::filterOperand(const SDNode *N, const SDValue &opval,
   // add any chained operands to roots
   if (opval.getValueType() == MVT::Other) {
     Roots.insert(opval.getNode());
-    errs() << DbgNode(opval.getNode(), Dag) << "added to roots\n";
+    DEBUG(dbgs() << DbgNode(opval.getNode(), Dag) << "added to roots\n");
     return true;
   }
 
@@ -539,7 +541,7 @@ void ClusteringHeuristic::apply(SelectionDAG *dag) {
   SDNode *N = --ISelPosition;
   while (ISelPosition != dag->allnodes_begin()) {
     if (!done[N->getNodeId()]) {
-      //errs() << "reselecting " << N->getNodeId() << " @ "<< N << "\n";
+      //dbgs() << "reselecting " << N->getNodeId() << " @ "<< N << "\n";
       reselect(N, dag);
       done[N->getNodeId()] = true;
       ISelPosition = next(SelectionDAG::allnodes_iterator(dag->getRoot().getNode()));
@@ -561,7 +563,7 @@ void ClusteringHeuristic::reselect(SDNode *N, SelectionDAG *dag)
   int oldOpc = N->getMachineOpcode();
   int newOpc = TII->getOpcodeForSide(oldOpc, getSide(N));
   if (newOpc < 0) {
-    errs() << N->getOperationName(dag) << " not mapped\n";
+    DEBUG(dbgs() << N->getOperationName(dag) << " not mapped\n");
     return;
   }
 
@@ -571,8 +573,8 @@ void ClusteringHeuristic::reselect(SDNode *N, SelectionDAG *dag)
 
   int unit = getUnit(N);
   if (unit < 0) {
-    errs() << DbgNode(N, dag) << "not assigned\n";
-    assert(false);
+    DEBUG(dbgs() << DbgNode(N, dag) << "not assigned\n");
+    assert(false && "node not assigned");
   }
 
   SmallVector<SDValue, 4> Ops;
@@ -619,6 +621,6 @@ void ClusteringHeuristic::reselect(SDNode *N, SelectionDAG *dag)
 
   MN->setMemRefs(mmo_begin, mmo_end);
 
-  errs() << TII->get(oldOpc).getName() << " -> " << N->getOperationName(dag)
-         << "\n";
+  DEBUG(dbgs() << TII->get(oldOpc).getName() << " -> "
+              << N->getOperationName(dag) << "\n");
 }

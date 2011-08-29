@@ -44,9 +44,16 @@ namespace C64X = llvm::TMS320C64X;
 using namespace llvm;
 
 //-----------------------------------------------------------------------------
+// Data for unit-to- string conversion
 static const char *unit_str[] = { "L", "S", "M", "D" };
 TMS320C64XInstrInfo::UnitStrings_t
   TMS320C64XInstrInfo::UnitStrings(unit_str, unit_str + 4);
+
+//-----------------------------------------------------------------------------
+// Data for resource-to-string conversion
+// Note: resource is unit+side
+std::string TMS320C64XInstrInfo::Res_a[] = { "L1", "S1", "M1", "D1" };
+std::string TMS320C64XInstrInfo::Res_b[] = { "L2", "S2", "M2", "D2" };
 
 //-----------------------------------------------------------------------------
 
@@ -54,31 +61,32 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
 : TargetInstrInfoImpl(TMS320C64XInsts, array_lengthof(TMS320C64XInsts)),
   RI(*this)
 {
+#if 0
   static const unsigned PseudoOpTbl[][3] = {
-     { C64X::add_p_rr,    C64X::add_rr_1,   C64X::add_rr_2 }
-    ,{ C64X::add_p_ri,    C64X::add_ri_1,   C64X::add_ri_2 }
-    ,{ C64X::srl_p_rr,    C64X::srl_rr_1,   C64X::srl_rr_2 }
-    ,{ C64X::srl_p_ri,    C64X::srl_ri_1,   C64X::srl_ri_2 }
-    ,{ C64X::mpy32_p,     C64X::mpy32_1,    C64X::mpy32_2  }
+    //{ C64X::add_p_rr,    C64X::add_rr_1,   C64X::add_rr_2 }
+    //{ C64X::add_p_ri,    C64X::add_ri_1,   C64X::add_ri_2 }
+    //{ C64X::srl_p_rr,    C64X::srl_rr_1,   C64X::srl_rr_2 }
+    //,{ C64X::srl_p_ri,    C64X::srl_ri_1,   C64X::srl_ri_2 }
+    //,{ C64X::mpy32_p,     C64X::mpy32_1,    C64X::mpy32_2  }
     // address loads (_sload = data path and FU on the same side)
     //,{ C64X::word_load_p_addr,   C64X::word_load_1,    C64X::word_load_2}
-    ,{ C64X::word_load_p_addr,   C64X::word_sload_1,   C64X::word_sload_2}
-    ,{ C64X::word_store_p_addr,  C64X::word_store_1,   C64X::word_store_2}
-    ,{ C64X::hword_load_p_addr,  C64X::hword_sload_1,  C64X::hword_sload_2}
-    ,{ C64X::hword_store_p_addr, C64X::hword_store_1,  C64X::hword_store_2}
-    ,{ C64X::uhword_load_p_addr, C64X::uhword_sload_1, C64X::uhword_sload_2}
-    ,{ C64X::byte_load_p_addr,   C64X::byte_sload_1,   C64X::byte_sload_2}
-    ,{ C64X::byte_store_p_addr,  C64X::byte_store_1,   C64X::byte_store_2}
-    ,{ C64X::ubyte_load_p_addr,  C64X::ubyte_sload_1,  C64X::ubyte_sload_2}
+    //{ C64X::word_load_p_addr,   C64X::word_sload_1,   C64X::word_sload_2}
+    //{ C64X::word_store_p_addr,  C64X::word_store_1,   C64X::word_store_2}
+    //,{ C64X::hword_load_p_addr,  C64X::hword_sload_1,  C64X::hword_sload_2}
+    //,{ C64X::hword_store_p_addr, C64X::hword_store_1,  C64X::hword_store_2}
+    //,{ C64X::uhword_load_p_addr, C64X::uhword_sload_1, C64X::uhword_sload_2}
+    //,{ C64X::byte_load_p_addr,   C64X::byte_sload_1,   C64X::byte_sload_2}
+    //,{ C64X::byte_store_p_addr,  C64X::byte_store_1,   C64X::byte_store_2}
+    //,{ C64X::ubyte_load_p_addr,  C64X::ubyte_sload_1,  C64X::ubyte_sload_2}
     // index loads
-    ,{ C64X::word_load_p_idx,    C64X::word_sload_1,  C64X::word_sload_2}
-    ,{ C64X::word_store_p_idx,   C64X::word_store_1,  C64X::word_store_2}
-    ,{ C64X::hword_load_p_idx,   C64X::hword_sload_1, C64X::hword_sload_2}
-    ,{ C64X::hword_store_p_idx,  C64X::hword_store_1, C64X::hword_store_2}
-    ,{ C64X::uhword_load_p_idx,  C64X::uhword_sload_1,C64X::uhword_sload_2}
-    ,{ C64X::byte_load_p_idx,    C64X::byte_sload_1,  C64X::byte_sload_2}
-    ,{ C64X::byte_store_p_idx,   C64X::byte_store_1,  C64X::byte_store_2}
-    ,{ C64X::ubyte_load_p_idx,   C64X::ubyte_sload_1, C64X::ubyte_sload_2}
+    //,{ C64X::word_load_p_idx,    C64X::word_sload_1,  C64X::word_sload_2}
+    //,{ C64X::word_store_p_idx,   C64X::word_store_1,  C64X::word_store_2}
+    //,{ C64X::hword_load_p_idx,   C64X::hword_sload_1, C64X::hword_sload_2}
+    //,{ C64X::hword_store_p_idx,  C64X::hword_store_1, C64X::hword_store_2}
+    //,{ C64X::uhword_load_p_idx,  C64X::uhword_sload_1,C64X::uhword_sload_2}
+    //,{ C64X::byte_load_p_idx,    C64X::byte_sload_1,  C64X::byte_sload_2}
+    //,{ C64X::byte_store_p_idx,   C64X::byte_store_1,  C64X::byte_store_2}
+    //,{ C64X::ubyte_load_p_idx,   C64X::ubyte_sload_1, C64X::ubyte_sload_2}
   };
 
   for (unsigned i = 0, e = array_lengthof(PseudoOpTbl); i != e; ++i) {
@@ -89,6 +97,7 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
             std::make_pair(SideAOp, SideBOp))).second)
       assert(false && "Duplicated entries?");
   }
+#endif
 
 #if 0
   // used for debugging instruction flags
@@ -100,6 +109,36 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
     dbgs() << "-- END FLAGS ---------------\n";
   }
 #endif
+
+  static const unsigned SideOpTbl[][2] = {
+     { C64X::mpy32_1,        C64X::mpy32_2 }
+
+    ,{ C64X::add_rr_1,       C64X::add_rr_2 }
+    ,{ C64X::add_ri_1,       C64X::add_ri_2 }
+    ,{ C64X::srl_rr_1,       C64X::srl_rr_2 }
+    ,{ C64X::srl_ri_1,       C64X::srl_ri_2 }
+
+    ,{ C64X::word_load_1,    C64X::word_load_2 }
+    ,{ C64X::word_store_1,   C64X::word_store_2 }
+    ,{ C64X::word_sload_1,   C64X::word_sload_2 }
+    ,{ C64X::hword_sload_1,  C64X::hword_sload_2 }
+    ,{ C64X::hword_store_1,  C64X::hword_store_2 }
+    ,{ C64X::uhword_sload_1, C64X::uhword_sload_2 }
+    ,{ C64X::byte_sload_1,   C64X::byte_sload_2 }
+    ,{ C64X::byte_store_1,   C64X::byte_store_2 }
+    ,{ C64X::ubyte_sload_1,  C64X::ubyte_sload_2 }
+  };
+
+  for (unsigned i = 0, e = array_lengthof(SideOpTbl); i != e; ++i) {
+    DenseMap<unsigned, unsigned>::iterator it;
+    bool inserted;
+    unsigned SideAOp = SideOpTbl[i][0];
+    unsigned SideBOp = SideOpTbl[i][1];
+    tie(it, inserted) = Side2SideMap.insert(std::make_pair(SideAOp, SideBOp));
+    assert(inserted);
+    tie(it, inserted) = Side2SideMap.insert(std::make_pair(SideBOp, SideAOp));
+    assert(inserted);
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -111,14 +150,22 @@ TMS320C64XInstrInfo::CreateTargetHazardRecognizer(const TargetMachine *TM,
   const TargetInstrInfo *TII = TM->getInstrInfo();
   assert(TII && "No InstrInfo? Can not create a hazard recognizer!");
 
-  // Only use hazard recognizer with post-RA scheduling setup
-  if (TM->getSubtarget<TMS320C64XSubtarget>().enablePostRAScheduler()) {
-    assert(false && "not yet implemented/tested");
-    return new TMS320C64XHazardRecognizer(*TII);
-  }
+  // XXX hazard recognizer only works for post RA scheduler right now
+  // return new TMS320C64XHazardRecognizer(*TII);
 
   // Otherwise use LLVM default
   return TargetInstrInfoImpl::CreateTargetHazardRecognizer(TM, DAG);
+}
+
+//-----------------------------------------------------------------------------
+
+ScheduleHazardRecognizer*
+TMS320C64XInstrInfo::CreatePostRAHazardRecognizer(const TargetMachine *TM)
+{
+  const TargetInstrInfo *TII = TM->getInstrInfo();
+  assert(TII && "No InstrInfo? Can not create a hazard recognizer!");
+
+  return new TMS320C64XHazardRecognizer(*TII);
 }
 
 //-----------------------------------------------------------------------------
@@ -268,7 +315,7 @@ TMS320C64XInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   MachineBasicBlock::iterator I = MBB.end();
 
   // if the machine basic block contains only debug
-  // values, there are obviously nothing to analyze
+  // values, there is obviously nothing to analyze
   while((--I)->isDebugValue())
     if (I == MBB.begin()) return false;
 
@@ -614,6 +661,25 @@ int TMS320C64XInstrInfo::getOpcodeForSide(int Opcode, int Side) const {
     return I->second.first;
   else // Side B
     return I->second.second;
+}
+
+//-----------------------------------------------------------------------------
+
+int TMS320C64XInstrInfo::getSideOpcode(int Opcode, int Side) const {
+
+  const TargetInstrDesc &desc = get(Opcode);
+  assert(desc.TSFlags & TMS320C64XII::is_side_inst);
+
+  // is the given Opcode already of the requested side?
+  if ((desc.TSFlags >> TMS320C64XII::side_shift) == (unsigned) Side)
+    return Opcode;
+
+  DenseMap<unsigned, unsigned>::const_iterator I = Side2SideMap.find(Opcode);
+  if (I == Side2SideMap.end()) {
+    assert(false && "not found");
+    return -1;
+  }
+  return I->second;
 }
 
 //-----------------------------------------------------------------------------

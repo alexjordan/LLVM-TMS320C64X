@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "sched-instrs"
-#include "ScheduleDAGInstrs.h"
+#include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/Operator.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -37,6 +37,15 @@ ScheduleDAGInstrs::ScheduleDAGInstrs(MachineFunction &mf,
     InstrItins(mf.getTarget().getInstrItineraryData()),
     Defs(TRI->getNumRegs()), Uses(TRI->getNumRegs()), LoopRegs(MLI, MDT) {
   DbgValueVec.clear();
+
+  // AJO create a special SUnit to signal a bundle end in the sequence
+  // (NULL SUnit is already used to signal Noop)
+  BundleEndSU = new SUnit();
+}
+
+ScheduleDAGInstrs::~ScheduleDAGInstrs() {
+  delete BundleEndSU;
+  BundleEndSU = 0;
 }
 
 /// Run - perform scheduling.
@@ -235,12 +244,16 @@ void ScheduleDAGInstrs::BuildSchedGraph(AliasAnalysis *AA) {
       continue;
     }
     const TargetInstrDesc &TID = MI->getDesc();
-    assert(!TID.isTerminator() && !MI->isLabel() &&
+    // AJO for TI post pass scheduling, we do schedule terminators
+    assert(!MI->isLabel() &&
            "Cannot schedule terminators or labels!");
     // Create the SUnit for this MI.
     SUnit *SU = NewSUnit(MI);
     SU->isCall = TID.isCall();
     SU->isCommutable = TID.isCommutable();
+
+    // The Regs used by SU
+    SmallSet<unsigned, 8> CurrentUses;
 
     // Assign the Latency field of SU using target-provided information.
     if (UnitLatencies)
@@ -391,11 +404,19 @@ void ScheduleDAGInstrs::BuildSchedGraph(AliasAnalysis *AA) {
         }
 
         UseList.clear();
+
+        // AJO the uses have been cleared, but uses by the current SU need to be
+        // restored (eg. calls may use some of the registers that are clobbered
+        // by the callee (imp-def))
+        if (CurrentUses.count(Reg))
+          UseList.push_back(SU);
+
         if (!MO.isDead())
           DefList.clear();
         DefList.push_back(SU);
       } else {
         UseList.push_back(SU);
+        CurrentUses.insert(Reg);
       }
     }
 
@@ -670,6 +691,10 @@ MachineBasicBlock *ScheduleDAGInstrs::EmitSchedule() {
       // Null SUnit* is a noop.
       EmitNoop();
       continue;
+    } else if (SU == BundleEndSU) {
+      // special SUnit to signal bundle end
+      EmitBundleEnd();
+      continue;
     }
 
     BB->insert(InsertPos, SU->getInstr());
@@ -690,4 +715,12 @@ MachineBasicBlock *ScheduleDAGInstrs::EmitSchedule() {
 
   DbgValueVec.clear();
   return BB;
+}
+
+unsigned ScheduleDAGInstrs::countNoops(const std::vector<SUnit*> &Sequence) const {
+  unsigned Noops = 0;
+  for (unsigned i = 0, e = Sequence.size(); i != e; ++i)
+    if (!Sequence[i] || !Sequence[i]->getInstr())
+      ++Noops;
+  return Noops;
 }

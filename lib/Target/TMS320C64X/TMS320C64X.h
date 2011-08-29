@@ -36,6 +36,7 @@ namespace llvm {
   /// declare methods for the pass-creators here
 
   FunctionPass *TMS320C64XCreateInstSelector(TargetMachine &TM);
+  FunctionPass *createTMS320C64XClusterAssignment(TargetMachine &tm);
   FunctionPass *createTMS320C64XDelaySlotFillerPass(TargetMachine &tm);
   FunctionPass *createTMS320C64XScheduler(TargetMachine &tm);
   extern Target TheTMS320C64XTarget;

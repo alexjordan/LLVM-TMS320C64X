@@ -532,6 +532,7 @@ namespace llvm {
     /// VerifySchedule - Verify that all SUnits were scheduled and that
     /// their state is consistent.
     void VerifySchedule(bool isBottomUp);
+    virtual unsigned countNoops(const std::vector<SUnit*> &Sequence) const;
 #endif
 
   protected:
@@ -567,6 +568,11 @@ namespace llvm {
     /// EmitNoop - Emit a noop instruction.
     ///
     void EmitNoop();
+
+    /// EmitBundleEnd - Emit bundle seperator pseudo instruction 
+    /// (if supported by architecture)
+    ///
+    void EmitBundleEnd();
 
     void EmitPhysRegCopy(SUnit *SU, DenseMap<SUnit*, unsigned> &VRBaseMap);
 

@@ -56,8 +56,6 @@ class TMS320C64XInstSelectorPass : public SelectionDAGISel {
       return "TMS320C64X Instruction Selection";
     }
 
-    virtual void PostprocessISelDAG();
-
 // What the fail.
 #define UNKNOWN MVT::i32
 #include "TMS320C64XGenDAGISel.inc"
@@ -99,7 +97,8 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
 
   // We handle all memory access in this save frame index'd accesses,
   // so bounce those to select_idxaddr
-  if (N.getOpcode() == ISD::FrameIndex) return false;
+  if (N.getOpcode() == ISD::FrameIndex)
+    return select_idxaddr(op, N, base, offs);
 
   if (N.getOpcode() == ISD::TargetExternalSymbol ||
       N.getOpcode() == ISD::TargetGlobalAddress)
@@ -253,21 +252,21 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
 bool
 TMS320C64XInstSelectorPass::select_idxaddr(SDNode *&op,
                                            SDValue &addr,
-					   SDValue &base,
+                                           SDValue &base,
                                            SDValue &offs)
 {
   MemSDNode *mem;
   FrameIndexSDNode *FIN;
   unsigned int align, want_align;
+  DebugLoc dl = op->getDebugLoc();
 
   if (op->getOpcode() == ISD::FrameIndex) {
     // Hackity hack: llvm wants the address of a stack slot. This
     // is handled by returning the frame pointer as base and stack
     // offset as offs; the "lea_fail" instruction then adds these
     // to form a pointer.
-
-    // NKIM, changed from getCopyFromReg to getRegister !
-    base = CurDAG->getRegister(TMS320C64X::A15, MVT::i32);
+    base = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl,
+                                  TMS320C64X::A15, MVT::i32);
     FIN = cast<FrameIndexSDNode>(op);
     offs = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i32);
     return true;
@@ -292,9 +291,11 @@ TMS320C64XInstSelectorPass::select_idxaddr(SDNode *&op,
 
   FIN = dyn_cast<FrameIndexSDNode>(addr);
 
-  if (!FIN) return false;
+  // AJO: must only be called with a frame index
+  assert(FIN);
 
-  base = CurDAG->getRegister(TMS320C64X::A15, MVT::i32);
+  base = CurDAG->getCopyFromReg(CurDAG->getEntryNode(), dl,
+                                TMS320C64X::A15, MVT::i32);
   offs = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i32);
   return true;
 }
@@ -313,20 +314,6 @@ bool TMS320C64XInstSelectorPass::bounce_predicate(SDNode *&op,
   sz = op->getNumOperands();
   out = op->getOperand(sz-1);
   return true;
-}
-
-//-----------------------------------------------------------------------------
-
-void TMS320C64XInstSelectorPass::PostprocessISelDAG() {
-
-  using namespace TMS320C64X;
-
-  if (TM.getSubtarget<TMS320C64XSubtarget>().enableClusterAssignment()) {
-    ClusteringHeuristic *bug = new ClusterBug(CurDAG, TM);
-    bug->run();
-    bug->apply(CurDAG);
-    delete bug;
-  }
 }
 
 //-----------------------------------------------------------------------------

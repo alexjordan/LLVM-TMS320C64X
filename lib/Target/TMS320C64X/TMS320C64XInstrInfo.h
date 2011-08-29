@@ -44,12 +44,14 @@ enum {
   unit_m = 2,
   unit_d = 3,
   is_bside = 0x10,
+  side_shift = 4,
   is_memaccess = 0x100,
   is_store = 0x800,
   mem_align_amt_mask = 0x600,
   mem_align_amt_shift = 9,
   fixed_unit_mask = 0x3000,
-  fixed_unit_shift = 12
+  fixed_unit_shift = 12,
+  is_side_inst = 0x4000
 };
 
 // unit support value that signifies: instruction is fixed
@@ -78,7 +80,16 @@ enum FUEncoding {
   FU_undef
 };
 
-} // namespace TMS320
+enum Resources {
+  NUM_FUS = 4,
+  NUM_SIDES = 2
+};
+
+enum Sides {
+  ASide = 0,
+  BSide = 1
+};
+} // namespace TMS320C64XII
 
 class TMS320C64XInstrInfo : public TargetInstrInfoImpl {
 public:
@@ -90,9 +101,12 @@ private:
 
   // maps pseudo instructions to side-specific ones
   DenseMap<unsigned*, std::pair<unsigned,unsigned> > Pseudo2ClusteredTable;
+  DenseMap<unsigned, unsigned> Side2SideMap;
 
-  // string representation for functional units
+  // string representation for functional units and resources
   static UnitStrings_t UnitStrings;
+  static std::string Res_a[TMS320C64XII::NUM_FUS];
+  static std::string Res_b[TMS320C64XII::NUM_FUS];
 
 public:
 
@@ -104,10 +118,14 @@ public:
       return RI;
     }
 
-    // NKIM, create a hazard recognizer for the TI target
+    // creates a generic hazard recognizer
     ScheduleHazardRecognizer*
     CreateTargetHazardRecognizer(const TargetMachine *TM,
                                  const ScheduleDAG *DAG) const;
+
+    // AJO hook used by the custom post RA scheduler
+    static ScheduleHazardRecognizer*
+    CreatePostRAHazardRecognizer(const TargetMachine *TM);
 
     virtual void copyPhysReg(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator I,
@@ -180,6 +198,7 @@ public:
     virtual bool isPredicated(const MachineInstr *MI) const;
 
     int getOpcodeForSide(int Opcode, int Side) const;
+    int getSideOpcode(int Opcode, int Side) const;
 
     // NKIM, NON-LLVM-custom stuff, put inside the class, made static, removed
     // implementation bodies in order to avoid header-confusions and building
@@ -207,8 +226,14 @@ public:
     static bool Predicate_uconst_n(SDNode *in, int bits);
     static bool Predicate_const_is_positive(SDNode *in);
 
-    // functional unit -> string conversion
+    // helpers for string conversion
     static const UnitStrings_t &getUnitStrings();
+    static std::string res2Str(int r) {
+      using namespace TMS320C64XII;
+      assert(r >= 0 && r < NUM_FUS * NUM_SIDES);
+      std::string (&c)[4] = ((r & 0x1) == ASide) ? Res_a : Res_b;
+      return c[r >> 1];
+    }
 
     static void dumpFlags(const MachineInstr *MI, raw_ostream &os);
     static void dumpFlags(const TargetInstrDesc &Desc, raw_ostream &os);

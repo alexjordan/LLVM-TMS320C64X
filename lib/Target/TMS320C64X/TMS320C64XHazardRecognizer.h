@@ -22,6 +22,7 @@
 namespace llvm {
 
 class TargetInstrInfo;
+class TargetInstrDesc;
 class MachineInstr;
 
 namespace TMS320C64X {
@@ -49,6 +50,7 @@ class TMS320C64XHazardRecognizer : public ScheduleHazardRecognizer {
   unsigned getUnitIndex(unsigned side, unsigned unit);
   unsigned getUnitIndex(SUnit *SU);
   bool isPseudo(SUnit *SU) const;
+  static bool isFlexibleInstruction(const TargetInstrDesc &tid);
   bool isMove(SUnit *SU) const;
   void fixResources(SUnit *SU);
   void setXPath(MachineInstr *MI, bool setOrUnset) const;

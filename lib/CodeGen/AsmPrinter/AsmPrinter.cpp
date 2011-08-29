@@ -1806,10 +1806,16 @@ void AsmPrinter::EmitBasicBlockStart(const MachineBasicBlock *MBB) const {
           OutStreamer.AddComment("%" + BB->getName());
       
       EmitBasicBlockLoopComments(*MBB, LI, *this);
-      
+
       // NOTE: Want this comment at start of line, don't emit with AddComment.
-      OutStreamer.EmitRawText(Twine(MAI->getCommentString()) + " BB#" +
-                              Twine(MBB->getNumber()) + ":");
+      // NKim, some targets may want the emission of all labels, including
+      // those that are reachable via a fallthrough only. For that we provide
+      // a way for the target to express this desire
+      if (NeedEmitFallthroughLabels())
+        OutStreamer.EmitLabel(MBB->getSymbol());
+      else
+        OutStreamer.EmitRawText(Twine(MAI->getCommentString()) + " BB#" +
+                                Twine(MBB->getNumber()) + ":");
     }
   } else {
     if (isVerbose()) {

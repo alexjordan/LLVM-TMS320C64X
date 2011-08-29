@@ -123,29 +123,32 @@ void TMS320C64XFrameLowering::emitEpilogue(MachineFunction &MF,
 
   const TMS320C64XInstrInfo &TII = *TM.getInstrInfo();
 
-  // For current situation, epilog has to be hard coded to allow
-  // parallel instructions to work, hence this unpleasant hack...
-#define BUNDLED_EPILOG
-#ifdef BUNDLED_EPILOG
-  TMS320C64XInstrInfo::addDefaultPred(
-    BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::epilog)));
-#else
-  TMS320C64XInstrInfo::addFormOp(
-    TMS320C64XInstrInfo::addDefaultPred(
-      BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::word_load_1))
-        .addReg(TMS320C64X::B3, RegState::Define).addReg(TMS320C64X::A15)
-          .addImm(-4)), TMS320C64XII::unit_d, true);
+  if (TM.getSubtarget<TMS320C64XSubtarget>().enablePostRAScheduler()) {
 
-  TMS320C64XInstrInfo::addDefaultPred(
-    BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::mv))
+    // unbundled epilogue instructions (weaved into other bundles)
+
+    TMS320C64XInstrInfo::addFormOp(
+      TMS320C64XInstrInfo::addDefaultPred(
+        BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::word_load_1))
+        .addReg(TMS320C64X::B3, RegState::Define).addReg(TMS320C64X::A15)
+        .addImm(-4)), TMS320C64XII::unit_d, true);
+
+    TMS320C64XInstrInfo::addDefaultPred(
+      BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::mv))
       .addReg(TMS320C64X::B15, RegState::Define).addReg(TMS320C64X::A15));
 
-  TMS320C64XInstrInfo::addFormOp(
-    TMS320C64XInstrInfo::addDefaultPred(
-      BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::word_load_1))
+    TMS320C64XInstrInfo::addFormOp(
+      TMS320C64XInstrInfo::addDefaultPred(
+        BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::word_load_1))
         .addReg(TMS320C64X::A15, RegState::Define)
-          .addReg(TMS320C64X::A15).addImm(0)), TMS320C64XII::unit_d, false);
-#endif
+        .addReg(TMS320C64X::A15).addImm(0)), TMS320C64XII::unit_d, false);
+  } else {
+
+    // epilogue via pseudo instruction (is a scheduling boundary)
+
+    TMS320C64XInstrInfo::addDefaultPred(
+      BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::epilog)));
+  }
 }
 
 //-----------------------------------------------------------------------------
