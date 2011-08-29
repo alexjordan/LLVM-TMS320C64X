@@ -34,5 +34,6 @@ llvm::TMS320C64XSubtarget::TMS320C64XSubtarget(const std::string &TT,
   : HasMPY32(true)
   , DoILP(false)
 {
-  ParseSubtargetFeatures(FS, "c64x+");
+  // AJO: currently defaults to baseline compiler (no ILP attempted)
+  ParseSubtargetFeatures(FS, "c64_basic");
 }
