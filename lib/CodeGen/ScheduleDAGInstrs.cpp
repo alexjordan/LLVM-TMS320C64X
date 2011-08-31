@@ -717,6 +717,7 @@ MachineBasicBlock *ScheduleDAGInstrs::EmitSchedule() {
   return BB;
 }
 
+#ifndef NDEBUG
 unsigned ScheduleDAGInstrs::countNoops(const std::vector<SUnit*> &Sequence) const {
   unsigned Noops = 0;
   for (unsigned i = 0, e = Sequence.size(); i != e; ++i)
@@ -724,3 +725,4 @@ unsigned ScheduleDAGInstrs::countNoops(const std::vector<SUnit*> &Sequence) cons
       ++Noops;
   return Noops;
 }
+#endif
