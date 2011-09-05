@@ -27,11 +27,17 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetLowering.h"
 
 using namespace llvm;
+
+static cl::opt<bool>
+BundleNoReorder("c64x-bundle-noreorder", cl::Hidden,
+           cl::desc("Don't reorder instructions when creating bundles"),
+           cl::init(false));
 
 //-----------------------------------------------------------------------------
 
@@ -581,6 +587,15 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
         lat = std::max(0, lat - 1);
         ExitSU.addPred(SDep(&SUnits[i], SDep::Order, lat));
       }
+    }
+  }
+
+  if (BundleNoReorder) {
+    SUnit *prevSU = NULL;
+    for (unsigned i = 0, e = SUnits.size(); i != e; ++i) {
+      if (prevSU)
+        prevSU->addPred(SDep(&SUnits[i], SDep::Order, 0));
+      prevSU = &SUnits[i];
     }
   }
 }

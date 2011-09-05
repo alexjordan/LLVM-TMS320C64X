@@ -229,6 +229,18 @@ TMS320C64XRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MBBI,
   MI.getOperand(i).ChangeToRegister(reg, false, false, true);
 }
 
+const TargetRegisterClass*
+llvm::TMS320C64X::resolveSide(const TargetRegisterClass *RC) {
+  using namespace TMS320C64X;
+  if (RC == ARegsRegisterClass || RC->hasSuperClass(ARegsRegisterClass))
+    return ARegsRegisterClass;
+  else if (RC == BRegsRegisterClass || RC->hasSuperClass(BRegsRegisterClass))
+    return BRegsRegisterClass;
+  assert(RC == GPRegsRegisterClass);
+  return RC;
+}
+
+
 //-----------------------------------------------------------------------------
 
 int

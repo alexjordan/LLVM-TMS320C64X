@@ -12,6 +12,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef LLVM_TARGET_TMS320C64X_CLUSTER_ASSIGNMENT_H
+#define LLVM_TARGET_TMS320C64X_CLUSTER_ASSIGNMENT_H
+
 #include "TMS320C64X.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
@@ -26,8 +29,41 @@ namespace llvm {
   class MachineInstr;
   class TMS320C64XInstrInfo;
 
-class TMS320C64XClusterAssignment : public MachineFunctionPass {
+namespace TMS320C64X {
 
+/// cluster assignment algorithms available through options
+enum AssignmentAlgorithm {
+  ClusterNone,
+  ClusterB,
+  ClusterUAS,
+  ClusterUAS_none,
+  ClusterUAS_rand,
+  ClusterUAS_mwp
+};
+}
+
+/// assignment hooks exposed to scheduling implementations
+class AssignmentState {
+  IndexedMap<unsigned, VirtReg2IndexFunctor> VXcc[2];
+  typedef IndexedMap<const TargetRegisterClass*, VirtReg2IndexFunctor> VirtMap_t;
+  VirtMap_t VirtMap;
+public:
+  virtual ~AssignmentState() {}
+  void addXccSplit(unsigned srcReg, unsigned dstReg, unsigned dstSide,
+                   MachineInstr *copyInst);
+
+  // returns 0 (noreg) if no XCC found
+  unsigned getXccVReg(unsigned reg, unsigned side) const;
+  unsigned getXccVReg(unsigned reg, const TargetRegisterClass *RC) const;
+
+  void addVChange(unsigned reg, const TargetRegisterClass *RC);
+
+  // returns NULL, if reg has not changed class
+  const TargetRegisterClass *getVChange(unsigned reg) const;
+};
+
+class TMS320C64XClusterAssignment : public MachineFunctionPass {
+protected:
   TargetMachine &TM;
   const TMS320C64XInstrInfo *TII;
   const TargetRegisterInfo *TRI;
@@ -49,17 +85,11 @@ public:
     return "C64x+ cluster assignment";
   }
 
-  bool runOnMachineFunction(MachineFunction &Fn);
-
-
 protected:
   typedef SmallSetVector<int,8> res_set_t;
 
   // assigns MI to res
   void assign(MachineInstr *MI, int res);
-
-  // concrete assignment algorithms override these
-  virtual void assignBasicBlock(MachineBasicBlock *MBB) = 0;
 
   // helpers
   void analyzeInstr(MachineInstr *MI, res_set_t &set) const;
@@ -74,3 +104,6 @@ protected:
                 const TargetRegisterClass *RC);
 };
 }
+
+#endif
+

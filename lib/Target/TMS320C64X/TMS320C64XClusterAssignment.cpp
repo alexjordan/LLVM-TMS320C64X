@@ -15,23 +15,29 @@
 #define DEBUG_TYPE "cluster-assignment"
 #include "TMS320C64XClusterAssignment.h"
 #include "TMS320C64XInstrInfo.h"
+#include "ClusterDAG.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "llvm/Support/Debug.h"
-//#undef DEBUG
-//#define DEBUG(x) x
+#undef DEBUG
+#define DEBUG(x) x
 
 using namespace llvm;
+using namespace llvm::TMS320C64X;
+
 namespace C64XII = TMS320C64XII;
 
 namespace {
-// register class narrowing
-const TargetRegisterClass *resolveRC(const TargetRegisterClass *Actual,
-                                     const TargetRegisterClass *Required) {
+
+/// helper that does register class narrowing - if required is more specific
+/// return required, otherwise actual.
+const TargetRegisterClass *narrowRC(const TargetRegisterClass *Actual,
+                                    const TargetRegisterClass *Required) {
   // restrict to A or B regs if required
   if (Required == TMS320C64X::ARegsRegisterClass ||
       Required == TMS320C64X::BRegsRegisterClass)
@@ -42,26 +48,78 @@ const TargetRegisterClass *resolveRC(const TargetRegisterClass *Actual,
   return Actual;
 }
 
+/// abstract base for basic block assignment
+struct BBAssign : public TMS320C64XClusterAssignment {
+
+  BBAssign(TargetMachine &tm) : TMS320C64XClusterAssignment(tm) {}
+
+  bool runOnMachineFunction(MachineFunction &Fn);
+
+  // concrete assignment algorithms override these
+  virtual void assignBasicBlock(MachineBasicBlock *MBB) = 0;
+};
+
 /// null assignment algorithm - does nothing
-struct NoAssign : public TMS320C64XClusterAssignment {
-  NoAssign(TargetMachine &tm) : TMS320C64XClusterAssignment(tm) {}
+struct NoAssign : public BBAssign {
+  NoAssign(TargetMachine &tm) : BBAssign(tm) {}
   virtual void assignBasicBlock(MachineBasicBlock *MBB) {}
 };
 
 /// test assignment algorithm - assigns everything possible to B side
-struct BSideAssigner : public TMS320C64XClusterAssignment {
+struct BSideAssigner : public BBAssign {
 
-  BSideAssigner(TargetMachine &tm) : TMS320C64XClusterAssignment(tm) {}
+  BSideAssigner(TargetMachine &tm) : BBAssign(tm) {}
 
   virtual void assignBasicBlock(MachineBasicBlock *MBB);
 
   int select(int side, const res_set_t &set);
 };
 
-enum AssignmentAlgorithm {
-  ClusterNone,
-  ClusterB
+/// assignment pass using a ScheduleDAG based scheduler class
+struct DagAssign : public TMS320C64XClusterAssignment {
+
+  /// algorithm for selecting a scheduler
+  AssignmentAlgorithm Algo;
+
+  /// the actual scheduler
+  ClusterDAG *Scheduler;
+
+  DagAssign(TargetMachine &tm, AssignmentAlgorithm algo)
+    : TMS320C64XClusterAssignment(tm)
+    , Algo(algo)
+  {}
+
+  void getAnalysisUsage(AnalysisUsage &AU) const {
+    AU.setPreservesCFG();
+    AU.addRequired<MachineDominatorTree>();
+    AU.addPreserved<MachineDominatorTree>();
+    AU.addRequired<MachineLoopInfo>();
+    AU.addPreserved<MachineLoopInfo>();
+    MachineFunctionPass::getAnalysisUsage(AU);
+  }
+
+  bool runOnMachineFunction(MachineFunction &Fn);
+  void applyXccUses(MachineFunction &Fn, const AssignmentState &State);
+  void assignPHIs(AssignmentState *State, MachineBasicBlock *MBB);
 };
+
+#if 0
+struct UAS : public TMS320C64XClusterAssignment {
+
+  std::vector<SUnit> SUnits;
+  std::vector<SUnit*> Sequence;
+  MachineBasicBlock::iterator Begin, End;
+  MachineBasicBlock *BB;
+  std::vector<MachineInstr *>DbgValueVec; // XXX needed?
+
+  UAS(TargetMachine &tm) : TMS320C64XClusterAssignment(tm) {}
+
+  virtual void assignBasicBlock(MachineBasicBlock *MBB);
+
+  MachineBasicBlock *EmitSchedule();
+
+};
+#endif
 }
 
 static cl::opt<AssignmentAlgorithm>
@@ -69,10 +127,12 @@ ClusterOpt("c64x-clst",
   cl::desc("Choose a cluster assignment algorithm"),
   cl::NotHidden,
   cl::values(
-    clEnumValN(ClusterNone, "none",
-               "Do not assign clusters"),
-    clEnumValN(ClusterB, "bside",
-               "Assign everything to cluster B"),
+    clEnumValN(ClusterNone, "none", "Do not assign clusters"),
+    clEnumValN(ClusterB, "bside", "Assign everything to cluster B"),
+    clEnumValN(ClusterUAS, "uas", "Unified assign and schedule"),
+    clEnumValN(ClusterUAS_none, "uas-none", "UAS (no priority: A before B)"),
+    clEnumValN(ClusterUAS_rand, "uas-rand", "UAS (random cluster priority)"),
+    clEnumValN(ClusterUAS_mwp, "uas-mwp", "UAS (magnitude weighted pred)"),
     clEnumValEnd),
   cl::init(ClusterNone));
 
@@ -89,7 +149,7 @@ TMS320C64XClusterAssignment::TMS320C64XClusterAssignment(TargetMachine &tm)
   , TRI(tm.getRegisterInfo())
 {}
 
-bool TMS320C64XClusterAssignment::runOnMachineFunction(MachineFunction &Fn) {
+bool BBAssign::runOnMachineFunction(MachineFunction &Fn) {
   MachineRegisterInfo &MRI = Fn.getRegInfo();
 
   // track vregs with changed register class
@@ -122,7 +182,7 @@ bool TMS320C64XClusterAssignment::runOnMachineFunction(MachineFunction &Fn) {
 
         const TargetRegisterClass *RCis =  MRI.getRegClass(MO.getReg());
         const TargetRegisterClass *RCshould =
-          resolveRC(RCis, TOI.getRegClass(TRI));
+          narrowRC(RCis, TOI.getRegClass(TRI));
 
         if (RCis != RCshould) {
           if (MO.isDef()) {
@@ -175,7 +235,7 @@ void TMS320C64XClusterAssignment::verifyUses(MachineFunction &MF,
           continue;
 
         const TargetRegisterClass *RCtgt =
-          resolveRC(RCvreg, TOI.getRegClass(TRI));
+          narrowRC(RCvreg, TOI.getRegClass(TRI));
 
         if (RCvreg != RCtgt) {
           DEBUG(dbgs() << *MI);
@@ -285,11 +345,177 @@ int BSideAssigner::select(int side, const res_set_t &set) {
   return -1;
 }
 
+//
+// DAG based assignment implementation
+//
+
+bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
+  const MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
+  const MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
+
+  AssignmentState State;
+  Scheduler = createClusterDAG(Algo, Fn, MLI, MDT, &State);
+
+  // use the post RA hazard recognizer
+  ResourceAssignment *RA =
+    TMS320C64XInstrInfo::CreateFunctionalUnitScheduler(&TM);
+  Scheduler->setFunctionalUnitScheduler(RA);
+
+  for (MachineFunction::iterator MBB = Fn.begin(), MBBe = Fn.end();
+       MBB != MBBe; ++MBB) {
+    assignPHIs(&State, MBB);
+    Scheduler->Run(MBB, MBB->getFirstNonPHI(), MBB->end(), MBB->size());
+  }
+
+  Fn.verify(this, "After Cluster Assignment");
+  Fn.dump();
+
+  delete Scheduler;
+  delete RA;
+  return true;
+}
+
+void DagAssign::assignPHIs(AssignmentState *State, MachineBasicBlock *MBB) {
+  MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+  for (MachineBasicBlock::iterator MI = MBB->begin(), ME = MBB->getFirstNonPHI();
+       MI != ME; ++MI) {
+    assert(MI->isPHI());
+    // XXX better way to assign defs by PHI nodes?
+    std::pair<int,int> opcnt = countOperandSides(MI, MRI);
+
+    const TargetRegisterClass *RC =
+      (opcnt.first > opcnt.second) ? BRegsRegisterClass : ARegsRegisterClass;
+    DEBUG(dbgs() << "PHI assign: " << *MI << " [A: " << opcnt.first << ", B: "
+          << opcnt.second << "] -> " << RC->getName() << "\n");
+    MachineOperand &MO = MI->getOperand(0);
+    MRI.setRegClass(MO.getReg(), RC);
+    State->addVChange(MO.getReg(), RC);
+  }
+}
+
+void DagAssign::applyXccUses(MachineFunction &MF, const AssignmentState &State) {
+  // XXX this may replace the use fixing in TMS320C64XClusterAssignment above
+
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
+  for (MachineFunction::iterator I = MF.begin(), E = MF.end(); I != E; ++I) {
+    MachineBasicBlock *MBB = I;
+    for (MachineBasicBlock::iterator MI = MBB->begin(), ME = MBB->end();
+         MI != ME; ++MI) {
+      // skip pseudo MIs
+      if (MI->getOpcode() <= TargetOpcode::COPY)
+        continue;
+
+      for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+        const TargetOperandInfo &TOI = MI->getDesc().OpInfo[i];
+        MachineOperand &MO = MI->getOperand(i);
+
+        if (!MO.isReg() || !MO.isUse()
+            || !TargetRegisterInfo::isVirtualRegister(MO.getReg())
+            || MO.getReg() == 0)
+          continue;
+
+        unsigned reg = MO.getReg();
+
+        const TargetRegisterClass *RCchg = State.getVChange(reg);
+        if (RCchg) {
+          DEBUG(dbgs() << "reg side-change at operand " << MO << ": ");
+          DEBUG(dbgs() << *MI);
+        }
+
+        if (TOI.isPredicate())
+          break;
+
+
+        const TargetRegisterClass *RCreg = MRI.getRegClass(reg);
+
+        // enforce predicate register rewrites
+        unsigned predReg =
+          State.getXccVReg(reg, TMS320C64XInstrInfo::getSide(MI));
+        if (predReg && MRI.getRegClass(reg) == PredRegsRegisterClass) {
+          MO.setReg(predReg);
+          continue;
+        }
+
+        // promote to A/B class
+        if (RCreg->hasSuperClass(ARegsRegisterClass))
+          RCreg = ARegsRegisterClass;
+        else if (RCreg->hasSuperClass(BRegsRegisterClass))
+          RCreg = BRegsRegisterClass;
+
+        assert(RCreg == ARegsRegisterClass ||
+               RCreg == BRegsRegisterClass);
+
+        const TargetRegisterClass *RCinst = TOI.getRegClass(TRI);
+
+        if (RCinst != GPRegsRegisterClass && RCreg != RCinst) {
+          DEBUG(dbgs() << *MI);
+          DEBUG(dbgs() << "RCs disagree at operand " << MO
+                << " is: " << RCreg->getName()
+                << ", should be: " << RCinst->getName() << "\n");
+          // look for XCC that copies reg to side of this MI
+          unsigned newReg =
+            State.getXccVReg(MO.getReg(), TMS320C64XInstrInfo::getSide(MI));
+          assert(newReg && "missing XCC vreg");
+          MO.setReg(newReg);
+        }
+      }
+    }
+  }
+}
+
+//
+// AssignmentState implementation
+//
+
+void AssignmentState::addXccSplit(unsigned srcReg, unsigned dstReg,
+                                  unsigned dstSide, MachineInstr *copyInst) {
+  VXcc[dstSide].grow(dstReg);
+  VXcc[dstSide][srcReg] = dstReg;
+}
+
+unsigned AssignmentState::getXccVReg(unsigned reg, unsigned side) const {
+  // check if this vreg has been mapped to side
+  if (!VXcc[side].inBounds(reg))
+    return 0;
+
+  // return the XCC version for the given cluster
+  return VXcc[side][reg];
+}
+
+unsigned
+AssignmentState::getXccVReg(unsigned reg, const TargetRegisterClass *RC) const {
+  int side = -1;
+  if (RC == ARegsRegisterClass)
+    side = 0;
+  else if (RC == BRegsRegisterClass)
+    side = 1;
+  assert(side >= 0);
+  return getXccVReg(reg, side);
+}
+
+void AssignmentState::addVChange(unsigned reg, const TargetRegisterClass *RC) {
+  VirtMap.grow(reg);
+  VirtMap[reg] = RC;
+}
+
+const TargetRegisterClass *AssignmentState::getVChange(unsigned reg) const {
+  if (!VirtMap.inBounds(reg))
+    return NULL;
+
+  return VirtMap[reg];
+}
+
 FunctionPass *llvm::createTMS320C64XClusterAssignment(TargetMachine &tm) {
   switch (ClusterOpt) {
   default: llvm_unreachable("unknown cluster assignment");
   case ClusterNone: return new NoAssign(tm);
-  case ClusterB: return new BSideAssigner(tm);
+  case ClusterB:    return new BSideAssigner(tm);
+  case ClusterUAS:
+  case ClusterUAS_none:
+  case ClusterUAS_rand:
+  case ClusterUAS_mwp:
+                    return new DagAssign(tm, ClusterOpt);
   }
 }
 
