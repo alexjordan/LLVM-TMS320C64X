@@ -343,76 +343,10 @@ class pseudo_ri<string mnemonic, string sidespec, dag imm, InstUnit u,
 class moveInstr<dag outs, dag ins, string asm, bit side, InstUnit u>
 : inst<outs, ins, asm, [], side, u>;
 
-////////////////////////////////////////////////////////////////////////////
-// following multiclass is for capturing the mvkl-instruction variants which
-// are used in pairs for loading an immediate value (or a label address) in-
-// to a register. We allow the unit-string to be passed in order to be able
-// to leave the unit empty, i.e. to leave the assignment up to the assembler
-
-multiclass moveLowInstr<string asmString, string unitString, bit side> {
-let isMoveImm = 1 in {
-  def _immediate : moveInstr<(outs GPRegs:$dst),
-                             (ins i32imm:$imm, pred:$prd),
-                             !strconcat(asmString, !strconcat("\t",
-                             !strconcat(unitString, "\t$imm,\t$dst"))),
-                             side, unit_s>;
-
-  // both, moves to register-side A and B must be done in consistence with
-  // with the unit-selection. A move to one of the A-registers has to be
-  // done on the unit 1 (L1, S1, D1), the same applies to the B-registers.
-  // TODO, for the time being we utilize the S-units only
-
-  def _immediate_A : moveInstr<(outs ARegs:$dst),
-                               (ins i32imm:$imm, ARegs:$src1),
-                               !strconcat(asmString, "\t.S1\t$imm,\t$dst"),
-                               0, unit_s>;
-
-  def _immediate_B : moveInstr<(outs BRegs:$dst),
-                               (ins i32imm:$imm, BRegs:$src1),
-                               !strconcat(asmString, "\t.S2\t$imm,\t$dst"),
-                               1, unit_s>;
-
-  // NOTE, moving a label into a register can only be done on the S2 unit
-
-  def _label : moveInstr<(outs GPRegs:$dst),
-                         (ins LabelOperand:$label, pred:$prd),
-                         !strconcat(asmString, "\t.S2\t$label,\t$dst"),
-                         1, unit_s>;
-}
-}
 
 ////////////////////////////////////////////////////////////////////////////
-// following multiclass is for capturing the mvkh-instruction variants which
-// are used in pairs for loaing an immediate values (or a label address) in-
-// to a register. Hereby we assume the mvkh instruction always to exist in
-// pairs with the mvkl instruction, therefore the instruction is restricted
-// to use the same register as a source/destination
-
-multiclass moveHighInstr<string asmString, string unitString, bit side> {
-let Constraints = "$src1 = $dst", isMoveImm = 1 in {
-
-  def _immediate : moveInstr<(outs GPRegs:$dst),
-                             (ins i32imm:$imm, GPRegs:$src1),
-                             !strconcat(asmString, !strconcat("\t",
-                             !strconcat(unitString, "\t$imm,\t$dst"))),
-                             side, unit_s>;
-
-  def _immediate_A : moveInstr<(outs ARegs:$dst),
-                               (ins i32imm:$imm, ARegs:$src1),
-                               !strconcat(asmString, "\t.S1\t$imm,\t$dst"),
-                               0, unit_s>;
-
-  def _immediate_B : moveInstr<(outs BRegs:$dst),
-                               (ins i32imm:$imm, BRegs:$src1),
-                               !strconcat(asmString, "\t.S2\t$imm,\t$dst"),
-                               1, unit_s>;
-
-  def _label : moveInstr<(outs GPRegs:$dst),
-                         (ins LabelOperand:$label, GPRegs:$src1),
-                         !strconcat(asmString, "\t.S2\t$label,\t$dst"),
-                         1, unit_s>;
-}
-}
+// AJO: these are legacy pseudo classes for load and store operations,
+// superseded by c64load and c64store.
 
 multiclass meminst_load_p<string mnemonic, PatFrag op> {
 
@@ -541,6 +475,15 @@ multiclass c64swp<dag inDag, dag inOp, SDNode op, InstructionForm default,
   }
   def _2 : c64new<(outs BRegs:$dst), !con(inOp, (ins BRegs:$src2)),
                   mnemonic, default, side_b>;
+}
+
+multiclass c64mvk<dag inOp, string mnemonic> {
+  def _1 : c64new<(outs ARegs:$dst), inOp, "", s_form, side_a> {
+    let AsmString = !strconcat(mnemonic, "\t.$fu\t$imm,\t$dst");
+  }
+  def _2 : c64new<(outs BRegs:$dst), inOp, "", s_form, side_b> {
+    let AsmString = !strconcat(mnemonic, "\t.$fu\t$imm,\t$dst");
+  }
 }
 
 // side-specific load/store

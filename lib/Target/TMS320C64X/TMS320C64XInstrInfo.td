@@ -272,31 +272,9 @@ def epilog : inst<(outs), (ins), "", [], 0, unit_s> {
 // MOVE instructions                                                         //
 ///////////////////////////////////////////////////////////////////////////////
 
-// FIXME, a move instruction, as well as a mvk or mvkh/mvkl for immediates can
-// be issued on an of the S, D, L units. For the time being we assign them to
-// the S unit only, resp. leave the unit selection up to the assembler
-
+// mv instruction is not flexible, unit selection is left to the assembler
 def mv : moveInstr<(outs GPRegs:$dst), (ins GPRegs:$src),
                    "mv\t$src,\t$dst", 0, unit_s>;
-
-defm mvkl : moveLowInstr<"mvkl", "", 0>;
-defm mvkh : moveHighInstr<"mvkh", "", 0>;
-
-// the same principle here too, for gen-purpose registers leave the unit un-
-// specified, for A resp. B reg files specify the execution unit explicitly.
-// This will allow an easier extending in future
-
-let isMoveImm = 1 in
-{
-  def mvk : moveInstr<(outs GPRegs:$dst), (ins i32imm:$imm, pred:$prd),
-                      "mvk\t$imm,\t$dst", 0, unit_s>;
-
-  def mvk_A : moveInstr<(outs ARegs:$dst), (ins i32imm:$imm, pred:$prd),
-                        "mvk\t.S1\t$imm,\t$dst", 0, unit_s>;
-
-  def mvk_B : moveInstr<(outs BRegs:$dst), (ins i32imm:$imm, pred:$prd),
-                        "mvk\t.S2\t$imm,\t$dst", 0, unit_s>;
-} // isMoveImm
 
 // mvd instruction can be issued on the M unit only. The instruction as such
 // is not that important, since i doubt there will be many situations where it
@@ -310,25 +288,49 @@ let Itinerary = Multiply,
                       "mvd\t.M1\t$src,\t$dst", 0, unit_m>;
 }
 
-// move appropriate immediates (signed16) directly
-def : Pat<(i32 isSigned16imm:$val), (mvk imm:$val)>;
+// MVK FLEXIBLE ENCODING (using c64inst and c64mvk)
+// FIXME, 5-bit immediates can be issued on an of the S, D, L units. 16-bit
+// immediates only on S. For the time being we assign them to the S unit only.
 
-// TODO, rename to be more expressive !
+let InOperandList = (ins i32imm:$src2, pred:$s, s_form:$fu),
+    AsmString = "mvk\t.$fu\t$src2,\t$dst",
+    isMoveImm = 1,
+    Supported = units_s in {
+  defm mvk : c64inst<(ins), "mvk">;
+}
+
+// These always match the _1 variant of the flexible pair of mvks.
+def : Pat<(i32 isSigned16imm:$val), (mvk_1 imm:$val)>;
+
+let Supported = units_s,
+    isMoveImm = 1 in {
+  defm mvkl : c64mvk<(ins i32imm:$imm), "mvkl">;
+  defm mvkl_label : c64mvk<(ins LabelOperand:$imm), "mvkl">;
+}
+
+let Supported = units_s,
+    Constraints = "$src1 = $dst",
+    isMoveImm = 1 in {
+  defm mvkh : c64mvk<(ins i32imm:$imm, GPRegs:$src1), "mvkh">;
+  defm mvkh_label : c64mvk<(ins LabelOperand:$imm, GPRegs:$src1), "mvkh">;
+}
+
 def : Pat<(i32 mvk_all_pred:$val),
-          (mvkh_immediate mvk_all_pred:$val,
-            (mvkl_immediate mvk_all_pred:$val))>;
+          (mvkh_1 mvk_all_pred:$val,
+            (mvkl_1 mvk_all_pred:$val))>;
 
 def : Pat<(i32 (Wrapper tglobaladdr:$val)),
-          (mvkh_immediate tglobaladdr:$val,
-            (mvkl_immediate tglobaladdr:$val))>;
+          (mvkh_1 tglobaladdr:$val,
+            (mvkl_1 tglobaladdr:$val))>;
 
 def : Pat<(i32 (Wrapper tjumptable:$dst)),
-          (mvkh_immediate tjumptable:$dst,
-            (mvkl_immediate tjumptable:$dst))>;
+          (mvkh_1 tjumptable:$dst,
+            (mvkl_1 tjumptable:$dst))>;
 
 def : Pat<(i32 (Wrapper texternalsym:$dst)),
-          (mvkh_immediate texternalsym:$dst,
-            (mvkl_immediate texternalsym:$dst))>;
+          (mvkh_1 texternalsym:$dst,
+            (mvkl_1 texternalsym:$dst))>;
+
 
 // NKim, instruction for emitting a returning pad for an indirectly called rou-
 // tine. I model this as a pseudo-instruction, since this correspond to a label.
@@ -348,8 +350,8 @@ def call_return_label : pseudoinst<(outs), (ins LabelOperand:$label),
 // for loading the upper and a lower part of the constant into a 32 bit TI-reg
 
 def : Pat<(call_label_operand_node texternalsym:$label),
-          (mvkh_label texternalsym:$label,
-            (mvkl_label texternalsym:$label))>;
+          (mvkh_label_1 texternalsym:$label,
+            (mvkl_label_1 texternalsym:$label))>;
 
 def : Pat<(call_return_label_node texternalsym:$label),
           (call_return_label texternalsym:$label)>;
@@ -595,7 +597,9 @@ def ret : inst<(outs), (ins), "b\t.S2\tB3", [(retflag)], 1, unit_s> {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+//                                                                           //
 // side-specific instructions                                                //
+//                                                                           //
 ///////////////////////////////////////////////////////////////////////////////
 
 let Supported = units_notm in {
@@ -608,27 +612,15 @@ let Supported = units_s in {
   defm srl_ri : c64ri<(i32 uconst5:$src2), (ins i32imm:$src2), srl, s_form, "shru">;
 }
 
-// NKIM, not sure whether this works properly
-let InOperandList = (ins i32imm:$src2, pred:$s, default_form:$fu),
-    AsmString = "mvk\t.$fu\t$src2,\t$dst",
-    Supported = units_s in {
-  defm mvk : c64inst<(ins), "mvk">;
-}
-
-/* stuff prior to llvm-2.9
-let InOperandList = (ops i32imm:$src2, pred:$s, form:$fu),
-    AsmString = "mvk\t.$fu\t$src2,\t$dst",
-    Supported = units_s in {
-  defm mvk : c64inst<(ins), "mvk">;
-}
-*/
-
 let DelaySlots = 3,
     hasDelaySlot = 1,
     Itinerary = Multiply,
     Supported = units_m in {
   defm mpy32 : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), mul, m_form, "mpy32">;
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// side-specific loads/stores
 
 let MemShift = 0 in {
   defm byte  : c64strictload<"b", sextloadi8>;
