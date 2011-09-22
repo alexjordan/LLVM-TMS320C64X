@@ -26,6 +26,10 @@
 
 #include "TMS320C64X.h"
 #include "TMS320C64XRegisterInfo.h"
+#include "TMS320C64XSubtarget.h"
+#include "llvm/CodeGen/MachineFunction.h"
+
+// include generated register description
 #include "TMS320C64XGenRegisterInfo.inc"
 
 // NKIM, bad, circular, but ok for now

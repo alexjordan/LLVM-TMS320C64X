@@ -70,6 +70,10 @@ namespace llvm {
     bool enableClusterAssignment() const {
       return DoILP;
     }
+
+    bool assignBSideRegisters() const {
+      return DoILP;
+    }
   };
 
 } // llvm namespace
