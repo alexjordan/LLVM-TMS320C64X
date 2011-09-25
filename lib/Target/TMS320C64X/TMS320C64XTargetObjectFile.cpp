@@ -13,12 +13,21 @@
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
+// We can't properly define sections, neither in COFF nor in ELF. So for both
+// formats we simply use .text and .data for everything.
+
 const MCSection *TMS320C64XTargetObjectFile::
 SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
                        Mangler *Mang, const TargetMachine &TM) const {
-  // Putting a global into a section would have to be done with .usect instead
-  // of .bss. But there is no "linkonce" anyway so we keep it simple.
+  if (Kind.isText())
+    return getTextSection();
 
+  return getDataSection();
+}
+
+const MCSection *TMS320C64XTargetObjectFileELF::
+SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
+                       Mangler *Mang, const TargetMachine &TM) const {
   if (Kind.isText())
     return getTextSection();
 

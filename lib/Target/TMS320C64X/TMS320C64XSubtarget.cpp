@@ -29,11 +29,17 @@
 #include "TMS320C64XGenSubtarget.inc"
 #include <cassert>
 
-llvm::TMS320C64XSubtarget::TMS320C64XSubtarget(const std::string &TT,
+using namespace llvm;
+
+TMS320C64XSubtarget::TMS320C64XSubtarget(const std::string &TT,
                                                const std::string &FS)
   : HasMPY32(true)
   , DoILP(false)
 {
   // AJO: currently defaults to baseline compiler (no ILP attempted)
   ParseSubtargetFeatures(FS, "c64_basic");
+}
+
+bool TMS320C64XSubtarget::hasLibcall(const char *name) const {
+  return Libcalls.count(name);
 }

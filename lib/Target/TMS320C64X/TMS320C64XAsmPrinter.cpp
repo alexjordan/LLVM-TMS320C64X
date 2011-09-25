@@ -194,19 +194,12 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 //-----------------------------------------------------------------------------
 
 bool TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
-  static const char *FPNames[] = {
-    "__addf", "__subf", "__mpyf", "__divf",
-    "__addd", "__subd", "__mpyd", "__divd",
-    "__cmpf", "__cmpd", "__cvtdf", "__cvtfd",
-    "__fixdi", "__fixdu", "__fixfi", "__fixfu",
-    "__fltid", "__fltif", "__fltud", "__fltuf" };
+  const TMS320C64XSubtarget &ST = TM.getSubtarget<TMS320C64XSubtarget>();
 
-  for (unsigned i = 0; i < array_lengthof(FPNames); ++i) {
-    if (strcmp(SymbolName, FPNames[i]) == 0) {
-      // don't mangle FP calls, but add to .refs
-      refSymbol(OutContext.GetOrCreateSymbol(StringRef(SymbolName)));
-      return true;
-    }
+  if (ST.hasLibcall(SymbolName)) {
+    // don't mangle FP calls, but add to .refs
+    refSymbol(OutContext.GetOrCreateSymbol(StringRef(SymbolName)));
+    return true;
   }
   return false;
 }
