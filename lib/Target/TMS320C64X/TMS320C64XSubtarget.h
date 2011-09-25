@@ -78,6 +78,8 @@ namespace llvm {
       return DoILP;
     }
 
+    const char *getABIOptionString() const;
+
     // store lib call name and return a 'safe' pointer to it.
     // used by lowering to add the appropriate standard library calls
     const char *addLibcall(const char *name) {

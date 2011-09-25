@@ -122,6 +122,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
                                raw_ostream &outputStream);
 
     virtual void EmitFunctionBodyStart() {}
+    virtual void EmitStartOfAsmFile(Module &);
     virtual void EmitEndOfAsmFile(Module &M);
 
     void printMBBInfo(const MachineBasicBlock *MBB);
@@ -639,6 +640,24 @@ void TMS320C64XAsmPrinter::refSymbol(MCSymbol *MCSym) {
   MachineModuleInfoImpl::StubValueTy &StubSym = MMIMachO.getFnStubEntry(MCSym);
   if (StubSym.getPointer() == 0)
     StubSym = MachineModuleInfoImpl::StubValueTy(MCSym, false);
+}
+
+//-----------------------------------------------------------------------------
+
+void TMS320C64XAsmPrinter::EmitStartOfAsmFile(Module &) {
+  const TMS320C64XSubtarget &ST = TM.getSubtarget<TMS320C64XSubtarget>();
+
+  SmallString<256> str;
+  raw_svector_ostream OS(str);
+
+  // build the magic compiler options line
+  OS << "\t.compiler_opts ";
+  OS << ST.getABIOptionString() << " ";
+  OS << "--c64p_l1d_workaround=default --endian=little ";
+  OS << "--hll_source=on --silicon_version=6500 ";
+  OS << "\n";
+
+  OutStreamer.EmitRawText(OS.str());
 }
 
 //-----------------------------------------------------------------------------

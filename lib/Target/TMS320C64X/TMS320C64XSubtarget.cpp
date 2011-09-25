@@ -40,6 +40,11 @@ TMS320C64XSubtarget::TMS320C64XSubtarget(const std::string &TT,
   ParseSubtargetFeatures(FS, "c64_basic");
 }
 
+const char *TMS320C64XSubtarget::getABIOptionString() const {
+  // XXX  this is ELF/EABI, handle COFF via subtarget feature?
+  return "--abi=eabi --long_precision_bits=32";
+}
+
 bool TMS320C64XSubtarget::hasLibcall(const char *name) const {
   return Libcalls.count(name);
 }
