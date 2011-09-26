@@ -1022,7 +1022,7 @@ TMS320C64XLowering::LowerIfConv(SDValue op, SelectionDAG &DAG) const
 	MachineRegisterInfo &RegInfo = MF.getRegInfo();
   DebugLoc dl = op.getDebugLoc();
   unsigned IntNo = cast<ConstantSDNode>(op.getOperand(0))->getZExtValue();
-  assert (IntNo == Intrinsic::vliw_ifconv_t);
+  assert (IntNo == Intrinsic::vliw_ifconv);
 
 	// Operand 1 is true/false, selects operand 2 or 3 respectively
 	// We'll generate this with two conditional move instructions - moving

@@ -8,6 +8,7 @@
 #include "llvm/Module.h"
 #include "llvm/Attributes.h"
 #include "llvm/Analysis/Dominators.h"
+#include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/IntervalPartition.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ProfileInfo.h"
@@ -48,6 +49,7 @@ namespace {
 
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
       AU.addRequired<DominatorTree>();
+      AU.addRequired<PostDominatorTree>();
       AU.addRequired<IntervalPartition>();
       AU.addRequiredTransitive<LoopInfo>();
       AU.addRequired<ProfileInfo>();
@@ -69,6 +71,7 @@ namespace {
     void runGlobal(Function &F);
     bool convertPHICycle(BasicBlock *BB, PHINode *PN);
     bool convertPHIs(BasicBlock *BB, PHINode *PN);
+    bool convertBranch(BasicBlock *BB);
     Value *combinePredicates(BasicBlock *BB, std::vector<IfInfo*> &ii);
     bool predicate(Function &F);
     bool predicateTopDown(Interval *Int);
@@ -197,6 +200,19 @@ static Value *GetIfCondition(BasicBlock *BB,
   return 0;
 }
 
+static CallInst *getPredicateIntrinsicCall(Instruction *I) {
+  CallInst *call = dyn_cast<CallInst>(I);
+  if (!call)
+    return NULL;
+
+  Function *callee = call->getCalledFunction();
+
+  if (!callee || !callee->isIntrinsic() ||
+      callee->getIntrinsicID() != Intrinsic::vliw_predicate_mem)
+    return NULL;
+  return call;
+}
+
 static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
   BasicBlock *BB = I->getParent();
   LLVMContext &ctx = I->getContext();
@@ -227,8 +243,29 @@ static void predicateInst(Instruction *I, Value *Cond, bool IsTrue) {
 template<class InputIterator>
 static void predicateInsts(InputIterator I, InputIterator E,
     Value *Cond, bool IsTrue) {
-  for (; I != E; ++I)
-    predicateInst(*I, Cond, IsTrue);
+  for (; I != E; ++I) {
+    CallInst *PredInst;
+    if ((PredInst = getPredicateIntrinsicCall(*I)) != NULL) {
+
+      // combine the predicates
+      LLVMContext &ctx = PredInst->getContext();
+      Instruction *insertIt = PredInst->getParent()->getFirstNonPHI();
+      Value *Pred, *Chain;
+
+      ConstantInt *predFlag = dyn_cast<ConstantInt>(PredInst->getOperand(0));
+      if (predFlag->isZero())
+        Pred = BinaryOperator::CreateNot(PredInst->getOperand(0), "p", insertIt);
+      else
+        Pred = PredInst->getOperand(0);
+
+      Chain = BinaryOperator::CreateAnd(Cond, Pred, "p", insertIt);
+
+      PredInst->setOperand(0, ConstantInt::getTrue(ctx));
+      PredInst->setOperand(1, Chain);
+    }
+    else
+      predicateInst(*I, Cond, IsTrue);
+  }
 }
 
 // chain predicates together
@@ -330,7 +367,7 @@ bool IfConvPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
     //Value *NV = SelectInst::Create(IfCond, TrueVal, FalseVal, "", AfterPHIIt);
     Module *M = F.getParent();
     const Type *Ty = TrueVal->getType();
-    Function *IfConvF = Intrinsic::getDeclaration(M, Intrinsic::vliw_ifconv_t, &Ty, 1);
+    Function *IfConvF = Intrinsic::getDeclaration(M, Intrinsic::vliw_ifconv, &Ty, 1);
     Value *Ops[] = { IfCond, TrueVal, FalseVal };
     Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi", AfterPHIIt);
 
@@ -423,6 +460,75 @@ bool IfConvPass::convertPHICycle(BasicBlock *BB, PHINode *PN) {
   return true;
 }
 
+static bool hasDependentPHI(BasicBlock *BB) {
+  for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I) {
+    for (Value::use_iterator UI = I->use_begin(), UE = I->use_end();
+        UI != UE; ++UI) {
+      if (dyn_cast<PHINode>(*UI)) {
+        DEBUG(dbgs() << *I << " used by a PHI node\n");
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool IfConvPass::convertBranch(BasicBlock *BB) {
+  PostDominatorTree &PDT = getAnalysis<PostDominatorTree>();
+  IntervalPartition &IP = getAnalysis<IntervalPartition>();
+
+  bool Changed = false;
+
+  BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
+  if (!BI || !BI->isConditional())
+    return false;
+
+  assert(BI->getNumSuccessors() == 2);
+
+  Interval *DomInt = IP.getBlockInterval(BB);
+
+  // go through the successor blocks
+  for (int i = 0; i < BI->getNumSuccessors(); ++i) {
+    BasicBlock *BBcond = BI->getSuccessor(i);
+    if (DomInt != IP.getBlockInterval(BBcond)) {
+      DEBUG(dbgs() << BBcond->getName() << " and " << BB->getName()
+                   << "are in different intervals\n");
+      continue;
+    }
+
+    if (BBcond->size() <= 1)
+      continue;
+
+    // is this block conditional
+    if (PDT.dominates(BBcond, &BB->getParent()->getEntryBlock()))
+      continue;
+
+    // are any values defined in the block used by a PHI?
+    if (hasDependentPHI(BBcond))
+      continue;
+
+    DEBUG(dbgs() << "hoisting: " << BBcond->getName() << " into "
+          << BB->getName() << "\n");
+    BlockInfo BBInfo;
+    Oracle oracle(PI);
+    oracle.analyze(BBcond, BBInfo);
+    assert(BBInfo.Convertible);
+
+    bool isTrue = (i == 0) ? true : false;
+    predicateInsts(BBInfo.SideEffectInsts.begin(),
+        BBInfo.SideEffectInsts.end(), BI->getCondition(), isTrue);
+
+    BB->getInstList().splice(BB->getTerminator(),
+        BBcond->getInstList(),
+        BBcond->begin(),
+        BBcond->getTerminator());
+    BB->getParent()->dump();
+    Changed |= true;
+  }
+
+  return Changed;
+}
+
 bool IfConvPass::simplify(Function &F) {
   const TargetData *TD = getAnalysisIfAvailable<TargetData>();
 
@@ -464,15 +570,31 @@ bool IfConvPass::simplify(Function &F) {
 
 bool IfConvPass::predicate(Function &F) {
   bool Changed = false;
+
   for (Function::iterator BBIt = ++F.begin(); BBIt != F.end(); ++BBIt) {
     BasicBlock *BB = &*BBIt;
 
-    if (PHINode *PN = dyn_cast<PHINode>(BB->begin()))
+    if (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
       if (PN->getNumIncomingValues() == 2) {
         Changed |= convertPHIs(BB, PN);
         Changed |= convertPHICycle(BB, PN);
       }
+    }
   }
+
+  if (Changed)
+    return true;
+
+  DEBUG(dbgs() << "-- now looking for branches --\n");
+  DEBUG(F.dump());
+
+  Function::BasicBlockListType &BBs = F.getBasicBlockList();
+  for (Function::BasicBlockListType::reverse_iterator I = BBs.rbegin(),
+       E = BBs.rend(); I != E; ++I) {
+    BasicBlock *BB = &*I;
+    Changed |= convertBranch(BB);
+  }
+
   return Changed;
 }
 
@@ -610,7 +732,7 @@ topo_tryagain:
           Module *M = F.getParent();
           const Type *Ty = TrueVal->getType();
           Function *IfConvF = Intrinsic::getDeclaration(M,
-              Intrinsic::vliw_ifconv_t, &Ty, 1);
+              Intrinsic::vliw_ifconv, &Ty, 1);
           Value *Ops[] = { ii->Condition, TrueVal, FalseVal };
           Value *NV = CallInst::Create(IfConvF, Ops, Ops + 3, "psi",
               MergeBB->getTerminator());
@@ -670,7 +792,7 @@ topo_tryagain:
         Module *M = F.getParent();
         const Type *Ty = TrueVal->getType();
         Function *IfConvF = Intrinsic::getDeclaration(M,
-            Intrinsic::vliw_ifconv_t, &Ty, 1);
+            Intrinsic::vliw_ifconv, &Ty, 1);
         if (!ii->Condition->getType()->isIntegerTy(1)) {
           ii->Condition->dump();
           assert(false);
@@ -753,10 +875,7 @@ bool IfConvPass::runOnFunction(Function &F) {
     DEBUG(PI->dump(&F));
   }
 
-  if (OptGlobal)
-    runGlobal(F);
-  else
-    runIterative(F);
+  runIterative(F);
 
   return true;
 }
@@ -938,9 +1057,14 @@ IfConv::Oracle::getEdgeCost(llvm::BasicBlock *srcBB, llvm::BasicBlock *dstBB) {
 void IfConv::Oracle::analyze(BasicBlock *BB, BlockInfo &info) {
   info.Name = BB->getNameStr();
   info.Convertible = true;
-  for (BasicBlock::iterator BBI = BB->begin(), BBE = BB->end();
-      BBI != BBE; ++BBI) {
-    Instruction *I = BBI;
+  bool nextPredicated = false;
+
+  BasicBlock::InstListType &InstList = BB->getInstList();
+
+  // reverse iteration since mem insts can be followed by a predicat call
+  for (BasicBlock::InstListType::reverse_iterator BBI = InstList.rbegin(),
+       BBE = InstList.rend(); BBI != BBE; ++BBI) {
+    Instruction *I = &*BBI;
 
     // count as instruction
     ++info.NumInstructions;
@@ -951,6 +1075,13 @@ void IfConv::Oracle::analyze(BasicBlock *BB, BlockInfo &info) {
 
     if (I->isSafeToSpeculativelyExecute())
       continue;
+    if (nextPredicated) {
+      nextPredicated = false;
+      assert (I->getOpcode() == Instruction::Store ||
+              I->getOpcode() == Instruction::Load);
+      continue;
+    }
+
     switch (I->getOpcode()) {
     default:
       DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
@@ -959,9 +1090,17 @@ void IfConv::Oracle::analyze(BasicBlock *BB, BlockInfo &info) {
     case Instruction::Call: {
       CallInst *call = dyn_cast<CallInst>(I);
       Function *callee = call->getCalledFunction();
-      if (!callee || !callee->isIntrinsic() ||
-          callee->getIntrinsicID() != Intrinsic::vliw_ifconv_t)
-        info.Convertible = false;
+      if (callee && callee->isIntrinsic()) {
+        if (callee->getIntrinsicID() == Intrinsic::vliw_ifconv)
+          break; // okay
+        else if (callee->getIntrinsicID() == Intrinsic::vliw_predicate_mem) {
+          nextPredicated = true;
+          info.SideEffectInsts.insert(I);
+          break;
+        }
+      }
+      DEBUG(dbgs() << "cannot predicate: " << *I << "\n");
+      info.Convertible = false;
       break;
     }
     case Instruction::Store:

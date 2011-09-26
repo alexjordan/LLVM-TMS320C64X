@@ -1,5 +1,5 @@
 let TargetPrefix = "vliw" in {  // All intrinsics start with "llvm.vliw.".
-  def int_vliw_ifconv_t :
+  def int_vliw_ifconv :
     Intrinsic<[llvm_anyint_ty],
               [llvm_i1_ty, LLVMMatchType<0>, LLVMMatchType<0>], [IntrNoMem]>;
 
