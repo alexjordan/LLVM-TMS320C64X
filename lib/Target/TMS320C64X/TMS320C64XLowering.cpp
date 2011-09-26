@@ -47,6 +47,7 @@
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/ADT/VectorExtras.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/MC/MCSymbol.h"
@@ -126,7 +127,12 @@ static bool CC_TMS320C64X_Custom(unsigned &ValNo,
 //-----------------------------------------------------------------------------
 
 TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
-: TargetLowering(tm, new TMS320C64XTargetObjectFile())
+#if 0
+: TargetLowering(tm, new TMS320C64XTargetObjectFile()),
+#else
+: TargetLowering(tm, new TMS320C64XTargetObjectFileELF()),
+#endif
+  ST(const_cast<TMS320C64XSubtarget*>(&tm.getSubtarget<TMS320C64XSubtarget>()))
 {
   addRegisterClass(MVT::i32, TMS320C64X::GPRegsRegisterClass);
   addRegisterClass(MVT::i32, TMS320C64X::ARegsRegisterClass);
@@ -169,24 +175,24 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   // Support for FP lib from TI
   //
   // Single-precision floating-point arithmetic.
-  setLibcallName(RTLIB::ADD_F32, "__addf");
-  setLibcallName(RTLIB::SUB_F32, "__subf");
-  setLibcallName(RTLIB::MUL_F32, "__mpyf");
-  setLibcallName(RTLIB::DIV_F32, "__divf");
+  setLibcallCustom(RTLIB::ADD_F32, "addf");
+  setLibcallCustom(RTLIB::SUB_F32, "subf");
+  setLibcallCustom(RTLIB::MUL_F32, "mpyf");
+  setLibcallCustom(RTLIB::DIV_F32, "divf");
 
-  // Double-precision floating-point arithmetic.
-  setLibcallName(RTLIB::ADD_F64, "__addd");
-  setLibcallName(RTLIB::SUB_F64, "__subd");
-  setLibcallName(RTLIB::MUL_F64, "__mpyd");
-  setLibcallName(RTLIB::DIV_F64, "__divd");
+  // Double-precision floating-pointrithmetic.
+  setLibcallCustom(RTLIB::ADD_F64, "addd");
+  setLibcallCustom(RTLIB::SUB_F64, "subd");
+  setLibcallCustom(RTLIB::MUL_F64, "mpyd");
+  setLibcallCustom(RTLIB::DIV_F64, "divd");
 
   // Single-precision comparisons.
-  setLibcallName(RTLIB::OEQ_F32, "__cmpf");
-  setLibcallName(RTLIB::UNE_F32, "__cmpf");
-  setLibcallName(RTLIB::OLT_F32, "__cmpf");
-  setLibcallName(RTLIB::OLE_F32, "__cmpf");
-  setLibcallName(RTLIB::OGE_F32, "__cmpf");
-  setLibcallName(RTLIB::OGT_F32, "__cmpf");
+  setLibcallCustom(RTLIB::OEQ_F32, "cmpf");
+  setLibcallCustom(RTLIB::UNE_F32, "cmpf");
+  setLibcallCustom(RTLIB::OLT_F32, "cmpf");
+  setLibcallCustom(RTLIB::OLE_F32, "cmpf");
+  setLibcallCustom(RTLIB::OGE_F32, "cmpf");
+  setLibcallCustom(RTLIB::OGT_F32, "cmpf");
   setLibcallName(RTLIB::UO_F32,  "__not_implemented");
   setLibcallName(RTLIB::O_F32,   "__not_implemented");
 
@@ -198,12 +204,12 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setCmpLibcallCC(RTLIB::OGT_F32, ISD::SETGT);
 
   // Double-precision comparisons.
-  setLibcallName(RTLIB::OEQ_F64, "__cmpd");
-  setLibcallName(RTLIB::UNE_F64, "__cmpd");
-  setLibcallName(RTLIB::OLT_F64, "__cmpd");
-  setLibcallName(RTLIB::OLE_F64, "__cmpd");
-  setLibcallName(RTLIB::OGE_F64, "__cmpd");
-  setLibcallName(RTLIB::OGT_F64, "__cmpd");
+  setLibcallCustom(RTLIB::OEQ_F64, "cmpd");
+  setLibcallCustom(RTLIB::UNE_F64, "cmpd");
+  setLibcallCustom(RTLIB::OLT_F64, "cmpd");
+  setLibcallCustom(RTLIB::OLE_F64, "cmpd");
+  setLibcallCustom(RTLIB::OGE_F64, "cmpd");
+  setLibcallCustom(RTLIB::OGT_F64, "cmpd");
   setLibcallName(RTLIB::UO_F64,  "_not_implemented");
   setLibcallName(RTLIB::O_F64,   "_not_implemented");
 
@@ -215,20 +221,20 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setCmpLibcallCC(RTLIB::OGT_F64, ISD::SETGT);
 
   // Conversions between floating types.
-  setLibcallName(RTLIB::FPROUND_F64_F32, "__cvtdf");
-  setLibcallName(RTLIB::FPEXT_F32_F64,   "__cvtfd");
+  setLibcallCustom(RTLIB::FPROUND_F64_F32,  "cvtdf");
+  setLibcallCustom(RTLIB::FPEXT_F32_F64,    "cvtfd");
 
   // Floating-point to integer conversions.
-  setLibcallName(RTLIB::FPTOSINT_F64_I32, "__fixdi");
-  setLibcallName(RTLIB::FPTOUINT_F64_I32, "__fixdu");
-  setLibcallName(RTLIB::FPTOSINT_F32_I32, "__fixfi");
-  setLibcallName(RTLIB::FPTOUINT_F32_I32, "__fixfu");
+  setLibcallCustom(RTLIB::FPTOSINT_F64_I32, "fixdi");
+  setLibcallCustom(RTLIB::FPTOUINT_F64_I32, "fixdu");
+  setLibcallCustom(RTLIB::FPTOSINT_F32_I32, "fixfi");
+  setLibcallCustom(RTLIB::FPTOUINT_F32_I32, "fixfu");
 
   // Integer to floating-point conversions.
-  setLibcallName(RTLIB::SINTTOFP_I32_F64, "__fltid");
-  setLibcallName(RTLIB::SINTTOFP_I32_F32, "__fltif");
-  setLibcallName(RTLIB::UINTTOFP_I32_F64, "__fltud");
-  setLibcallName(RTLIB::UINTTOFP_I32_F32, "__fltuf");
+  setLibcallCustom(RTLIB::SINTTOFP_I32_F64, "fltid");
+  setLibcallCustom(RTLIB::SINTTOFP_I32_F32, "fltif");
+  setLibcallCustom(RTLIB::UINTTOFP_I32_F64, "fltud");
+  setLibcallCustom(RTLIB::UINTTOFP_I32_F32, "fltuf");
 
   // We can generate two conditional instructions for select, not so
   // easy for select_cc
@@ -987,4 +993,30 @@ SDValue TMS320C64XLowering::LowerVAARG(SDValue op, SelectionDAG &DAG) const {
   // Actually load the argument
   return DAG.getLoad(
     vt, op.getDebugLoc(), chain, loadptr, MachinePointerInfo(), false, false, 4);
+}
+
+void
+TMS320C64XLowering::setLibcallCustom(RTLIB::Libcall Call, const char *Name) {
+  SmallString<30> smallstr;
+  // XXX prefix depends on ABI version
+#if 0
+  // COFF
+  smallstr += "__";
+#else
+  // EABI
+  smallstr += "__c6xabi_";
+#endif
+
+  // Name is just the pure name without prefix, add it.
+  smallstr += Name;
+
+  // we need to store the libcall name (in the Subtarget object) since
+  // setLibcallName does not copy it.
+  const char *stored;
+
+  // store the libcall name in the subtarget
+  stored = ST->addLibcall(smallstr.c_str());
+
+  // set as name of the call
+  setLibcallName(Call, stored);
 }

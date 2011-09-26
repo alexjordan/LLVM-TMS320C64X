@@ -64,6 +64,8 @@ class TMS320C64XTargetMachine;
 
 class TMS320C64XLowering : public TargetLowering {
 
+  TMS320C64XSubtarget *ST;
+
   public:
     explicit TMS320C64XLowering(TargetMachine &TM);
 
@@ -126,6 +128,8 @@ class TMS320C64XLowering : public TargetLowering {
     SDValue LowerVAARG(SDValue op, SelectionDAG &DAG) const;
 
     std::pair<SDValue,bool> ConvertSETCC(SDValue op, SelectionDAG &DAG) const;
+
+    void setLibcallCustom(RTLIB::Libcall Call, const char *Name);
 };
 
 } // namespace llvm

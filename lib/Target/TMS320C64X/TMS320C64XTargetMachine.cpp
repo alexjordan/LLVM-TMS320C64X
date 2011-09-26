@@ -37,7 +37,11 @@ using namespace llvm;
 
 extern "C" void LLVMInitializeTMS320C64XTarget() {
   RegisterTargetMachine<TMS320C64XTargetMachine> X(TheTMS320C64XTarget);
+#if 0
   RegisterAsmInfo<TMS320C64XMCAsmInfo> Z(TheTMS320C64XTarget);
+#else
+  RegisterAsmInfo<TMS320C64XMCAsmInfoELF> Z(TheTMS320C64XTarget);
+#endif
 }
 
 //-----------------------------------------------------------------------------

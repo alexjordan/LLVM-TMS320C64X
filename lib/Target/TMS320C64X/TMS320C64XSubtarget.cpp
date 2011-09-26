@@ -29,11 +29,22 @@
 #include "TMS320C64XGenSubtarget.inc"
 #include <cassert>
 
-llvm::TMS320C64XSubtarget::TMS320C64XSubtarget(const std::string &TT,
+using namespace llvm;
+
+TMS320C64XSubtarget::TMS320C64XSubtarget(const std::string &TT,
                                                const std::string &FS)
   : HasMPY32(true)
   , DoILP(false)
 {
   // AJO: currently defaults to baseline compiler (no ILP attempted)
   ParseSubtargetFeatures(FS, "c64_basic");
+}
+
+const char *TMS320C64XSubtarget::getABIOptionString() const {
+  // XXX  this is ELF/EABI, handle COFF via subtarget feature?
+  return "--abi=eabi --long_precision_bits=32";
+}
+
+bool TMS320C64XSubtarget::hasLibcall(const char *name) const {
+  return Libcalls.count(name);
 }

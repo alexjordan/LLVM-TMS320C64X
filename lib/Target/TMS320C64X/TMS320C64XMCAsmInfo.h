@@ -33,8 +33,11 @@ namespace llvm {
 	class Target;
 	class StringRef;
 	struct TMS320C64XMCAsmInfo : public MCAsmInfoCOFF {
-	explicit TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT);
-};
+    explicit TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT);
+  };
+	struct TMS320C64XMCAsmInfoELF : public MCAsmInfo {
+    explicit TMS320C64XMCAsmInfoELF(const Target &T, const StringRef &TT);
+  };
 } // namespace llvm
 
 #endif

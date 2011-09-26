@@ -30,6 +30,7 @@
 #include "llvm/Target/TargetInstrItineraries.h"
 #include "llvm/Target/TargetSubtarget.h"
 #include <string>
+#include <set>
 
 namespace llvm {
   class TMS320C64XSubtarget : public TargetSubtarget {
@@ -45,6 +46,8 @@ namespace llvm {
     std::string ParseSubtargetFeatures(const std::string &,
                                        const std::string &);
 
+    // standard library that the target has
+    std::set<std::string> Libcalls;
   public:
 
     TMS320C64XSubtarget(const std::string &TT,
@@ -74,6 +77,17 @@ namespace llvm {
     bool assignBSideRegisters() const {
       return DoILP;
     }
+
+    const char *getABIOptionString() const;
+
+    // store lib call name and return a 'safe' pointer to it.
+    // used by lowering to add the appropriate standard library calls
+    const char *addLibcall(const char *name) {
+      return Libcalls.insert(name).first->c_str();
+    }
+
+    // check if name is the name of libcall
+    bool hasLibcall(const char *name) const;
   };
 
 } // llvm namespace

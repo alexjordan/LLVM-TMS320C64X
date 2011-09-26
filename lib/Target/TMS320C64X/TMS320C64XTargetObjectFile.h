@@ -25,6 +25,14 @@ namespace llvm {
                                             const TargetMachine &TM) const;
 
   };
+
+  class TMS320C64XTargetObjectFileELF : public TargetLoweringObjectFileELF {
+  public:
+    const MCSection *SelectSectionForGlobal(const GlobalValue *GV,
+                                            SectionKind Kind,
+                                            Mangler *Mang,
+                                            const TargetMachine &TM) const;
+  };
 } // end namespace llvm
 
 #endif

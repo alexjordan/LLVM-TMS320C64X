@@ -122,6 +122,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
                                raw_ostream &outputStream);
 
     virtual void EmitFunctionBodyStart() {}
+    virtual void EmitStartOfAsmFile(Module &);
     virtual void EmitEndOfAsmFile(Module &M);
 
     void printMBBInfo(const MachineBasicBlock *MBB);
@@ -194,19 +195,12 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 //-----------------------------------------------------------------------------
 
 bool TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
-  static const char *FPNames[] = {
-    "__addf", "__subf", "__mpyf", "__divf",
-    "__addd", "__subd", "__mpyd", "__divd",
-    "__cmpf", "__cmpd", "__cvtdf", "__cvtfd",
-    "__fixdi", "__fixdu", "__fixfi", "__fixfu",
-    "__fltid", "__fltif", "__fltud", "__fltuf" };
+  const TMS320C64XSubtarget &ST = TM.getSubtarget<TMS320C64XSubtarget>();
 
-  for (unsigned i = 0; i < array_lengthof(FPNames); ++i) {
-    if (strcmp(SymbolName, FPNames[i]) == 0) {
-      // don't mangle FP calls, but add to .refs
-      refSymbol(OutContext.GetOrCreateSymbol(StringRef(SymbolName)));
-      return true;
-    }
+  if (ST.hasLibcall(SymbolName)) {
+    // don't mangle FP calls, but add to .refs
+    refSymbol(OutContext.GetOrCreateSymbol(StringRef(SymbolName)));
+    return true;
   }
   return false;
 }
@@ -646,6 +640,24 @@ void TMS320C64XAsmPrinter::refSymbol(MCSymbol *MCSym) {
   MachineModuleInfoImpl::StubValueTy &StubSym = MMIMachO.getFnStubEntry(MCSym);
   if (StubSym.getPointer() == 0)
     StubSym = MachineModuleInfoImpl::StubValueTy(MCSym, false);
+}
+
+//-----------------------------------------------------------------------------
+
+void TMS320C64XAsmPrinter::EmitStartOfAsmFile(Module &) {
+  const TMS320C64XSubtarget &ST = TM.getSubtarget<TMS320C64XSubtarget>();
+
+  SmallString<256> str;
+  raw_svector_ostream OS(str);
+
+  // build the magic compiler options line
+  OS << "\t.compiler_opts ";
+  OS << ST.getABIOptionString() << " ";
+  OS << "--c64p_l1d_workaround=default --endian=little ";
+  OS << "--hll_source=on --silicon_version=6500 ";
+  OS << "\n";
+
+  OutStreamer.EmitRawText(OS.str());
 }
 
 //-----------------------------------------------------------------------------
