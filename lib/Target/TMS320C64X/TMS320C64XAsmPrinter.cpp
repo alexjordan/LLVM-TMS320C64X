@@ -65,6 +65,7 @@ namespace {
 class TMS320C64XAsmPrinter : public AsmPrinter {
 
     SmallVector<const char *, 4> UnitStrings;
+    const TMS320C64XSubtarget &ST;
     bool BundleMode;
 
   public:
@@ -138,12 +139,9 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
 TMS320C64XAsmPrinter::TMS320C64XAsmPrinter(TargetMachine &TM, MCStreamer &MCS)
 : AsmPrinter(TM, MCS),
   UnitStrings(TMS320C64XInstrInfo::getUnitStrings()),
-  BundleMode(TM.getSubtarget<TMS320C64XSubtarget>().enablePostRAScheduler())
-{
-// exists only in the llvm-2.9 dev-trunk
-// TM.setMCSaveTempLabels(true);
-// OutContext.setAllowTemporaryLabels(true)
-}
+  ST(TM.getSubtarget<TMS320C64XSubtarget>()),
+  BundleMode(ST.enablePostRAScheduler())
+{}
 
 //-----------------------------------------------------------------------------
 
@@ -196,7 +194,6 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 //-----------------------------------------------------------------------------
 
 bool TMS320C64XAsmPrinter::handleSoftFloatCall(const char *SymbolName) {
-  const TMS320C64XSubtarget &ST = TM.getSubtarget<TMS320C64XSubtarget>();
 
   if (ST.hasLibcall(SymbolName)) {
     // don't mangle FP calls, but add to .refs
@@ -372,8 +369,11 @@ void TMS320C64XAsmPrinter::printFU(const MachineInstr *MI,
 
   // append datapath for load/stores
   if (MI->getDesc().TSFlags & TMS320C64XII::is_memaccess) {
-    if (fuOp & 0x1) OS << "T2";
-    else OS << "T1";
+    // we don't always get the dataline right in single side mode
+    if (ST.enablePostRAScheduler()) {
+      if (fuOp & 0x1) OS << "T2";
+      else OS << "T1";
+    }
     return;
   }
   // append XPath otherwise
@@ -660,7 +660,6 @@ void TMS320C64XAsmPrinter::refContents(Constant *C) {
 //-----------------------------------------------------------------------------
 
 void TMS320C64XAsmPrinter::EmitStartOfAsmFile(Module &) {
-  const TMS320C64XSubtarget &ST = TM.getSubtarget<TMS320C64XSubtarget>();
 
   SmallString<256> str;
   raw_svector_ostream OS(str);
