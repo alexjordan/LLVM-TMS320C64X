@@ -7,17 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Perform a formation of superblocks.
+// Perform a formation of superblocks (represented as a list of machine blocks)
 //
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "superblock-formation"
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineSuperBlock.h"
 #include "llvm/CodeGen/SuperblockFormation.h"
-#include "llvm/CodeGen/MachinePathProfileBuilder.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
@@ -41,13 +37,18 @@ ExecThresh("exec-freq-thresh",
 
 //----------------------------------------------------------------------------
 
+MachineSuperBlockMapTy
+SuperblockFormation::superBlocks = MachineSuperBlockMapTy();
+
 char SuperblockFormation::ID = 0;
+
+//----------------------------------------------------------------------------
 
 INITIALIZE_PASS_BEGIN(SuperblockFormation, "superblock-formation",
                 "Profile Guided Superblock Formation", false, false)
-INITIALIZE_PASS_DEPENDENCY(MachinePathProfileBuilder)
 INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
+INITIALIZE_AG_DEPENDENCY(MachineProfileAnalysis)
 INITIALIZE_PASS_END(SuperblockFormation, "superblock-formation",
                 "Profile Guided Superblock Formation", false, false)
 
@@ -67,12 +68,12 @@ SuperblockFormation::SuperblockFormation()
 
 //----------------------------------------------------------------------------
 
-SuperblockFormation::~SuperblockFormation() { clearSuperblockSet(); }
+SuperblockFormation::~SuperblockFormation() { clearSuperblockMap(); }
 
 //----------------------------------------------------------------------------
 
 void SuperblockFormation::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<MachinePathProfileBuilder>();
+  AU.addRequired<MachineProfileAnalysis>();
   AU.addRequired<MachineDominatorTree>();
   AU.addRequired<MachineLoopInfo>();
   MachineFunctionPass::getAnalysisUsage(AU);
@@ -80,9 +81,9 @@ void SuperblockFormation::getAnalysisUsage(AnalysisUsage &AU) const {
 
 //----------------------------------------------------------------------------
 
-void SuperblockFormation::clearSuperblockSet() {
+void SuperblockFormation::clearSuperblockMap() {
   while (superBlocks.size()) {
-    MachineSuperBlock *MSB = *(superBlocks.begin());
+    MachineSuperBlock *MSB = superBlocks.begin()->second;
     superBlocks.erase(superBlocks.begin());
     delete MSB;
   }
@@ -90,7 +91,7 @@ void SuperblockFormation::clearSuperblockSet() {
 
 //----------------------------------------------------------------------------
 
-const MachineSuperBlockSetTy &SuperblockFormation::getSuperblocks() const {
+const MachineSuperBlockMapTy &SuperblockFormation::getSuperblocks() {
   return superBlocks;
 }
 
@@ -396,7 +397,9 @@ SuperblockFormation::cloneMachineBasicBlock(MachineBasicBlock *MBB,
 
   MachineFunction &MF = *(MBB->getParent());
   MachineRegisterInfo *MRI = &MF.getRegInfo();
-  MachineBasicBlock *cloneMBB = MF.CreateMachineBasicBlock();
+
+  const BasicBlock *BB = MBB->getBasicBlock();
+  MachineBasicBlock *cloneMBB = MF.CreateMachineBasicBlock(BB);
 
   // insert the clone instantly, this may help to avoid pretty strange surp-
   // rises such as inability to attach cloned instructions to the block due
@@ -629,8 +632,11 @@ void SuperblockFormation::processTrace(const MachineProfilePathBlockList &PP,
 
     if (SB.size() > 1) {
       eliminateSideEntries(SB);
-      MachineSuperBlock *superblock = new MachineSuperBlock(SB, count);
-      superBlocks.insert(superblock);
+
+      MachineSuperBlock *superblock =
+        new MachineSuperBlock(*(SB.front()->getParent()), *SB.front(), SB);
+
+      superBlocks.insert(std::make_pair(count, superblock));
 
       // check again and emit the content for the debug
       DEBUG(superblock->verify(); superblock->print());
@@ -647,18 +653,16 @@ void SuperblockFormation::processTrace(const MachineProfilePathBlockList &PP,
 
 bool SuperblockFormation::runOnMachineFunction(MachineFunction &MF) {
 
-  MachinePathProfileBuilder *builder =
-    getAnalysisIfAvailable<MachinePathProfileBuilder>();
+  clearSuperblockMap();
+  processedBlocks.clear();
 
-  if (!builder) return false;
+  NumSuperBlocks = 0;
+  NumDuplicatedBlocks = 0;
 
-  // since the builder makes use of multiple inheritance we convert it into
-  // an analysis object to obtain the path profile info for machine blocks
+  MachineProfileAnalysis *builder =
+    getAnalysisIfAvailable<MachineProfileAnalysis>();
 
-  MachinePathProfileInfo *MPI = (MachinePathProfileInfo*)
-    builder->getAdjustedAnalysisPointer(&MachinePathProfileInfo::ID);
-
-  if (!MPI || MPI->isEmpty()) return false;
+  if (!builder || builder->pathsEmpty()) return false;
 
   DEBUG(dbgs() << "Run 'SuperblockFormation' pass for '"
                << MF.getFunction()->getNameStr() << "'\n");
@@ -667,17 +671,11 @@ bool SuperblockFormation::runOnMachineFunction(MachineFunction &MF) {
   MDT = &getAnalysis<MachineDominatorTree>();
   TII = MF.getTarget().getInstrInfo();
 
-  clearSuperblockSet();
-  processedBlocks.clear();
-
-  NumSuperBlocks = 0;
-  NumDuplicatedBlocks = 0;
-
   /// now process all constructed paths of machine basic blocks in descending
   /// order (with respect to the execution frequency of the machine bb-path)
 
-  MachinePathProfileInfo::reverse_iterator I;
-  for (I = MPI->rbegin(); I != MPI->rend(); ++I) {
+  MachineProfileAnalysis::reverse_iterator I;
+  for (I = builder->rbegin(); I != builder->rend(); ++I) {
 
     const unsigned count = I->first;
     const MachineProfilePathBlockList &blocks =
