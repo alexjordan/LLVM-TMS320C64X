@@ -328,6 +328,8 @@ bool IfConvPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
     return false;
 
   if (IfBlock1) {
+    oracle.analyze(IfBlock1, BBInfo[0]);
+
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
         IfBlock1->getInstList(),
         IfBlock1->begin(),
@@ -336,12 +338,14 @@ bool IfConvPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
     TruePred[0] = IfBlock1 == IfTrue;
   }
   if (IfBlock2) {
+    oracle.analyze(IfBlock2, BBInfo[1]);
+
     DomBlock->getInstList().splice(DomBlock->getTerminator(),
         IfBlock2->getInstList(),
         IfBlock2->begin(),
         IfBlock2->getTerminator());
 
-    TruePred[1] = IfBlock1 == IfTrue;
+    TruePred[1] = IfBlock2 == IfTrue;
   }
 
   if (IfBlock1 && IfBlock2)
