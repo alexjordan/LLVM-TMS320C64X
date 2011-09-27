@@ -501,6 +501,15 @@ static double readEdgeOrRemember(ProfileInfo::Edge edge, double w,
 }
 
 template<>
+bool ProfileInfoT<MachineFunction, MachineBasicBlock>::
+        CalculateMissingEdge(const MachineBasicBlock *MBB, Edge &removed,
+                             bool assumeEmptySelf)
+{
+  // not yet implemented !
+  return false;
+}
+
+template<>
 bool ProfileInfoT<Function,BasicBlock>::
         CalculateMissingEdge(const BasicBlock *BB, Edge &removed,
                              bool assumeEmptySelf) {

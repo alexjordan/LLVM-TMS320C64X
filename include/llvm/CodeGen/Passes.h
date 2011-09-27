@@ -28,11 +28,10 @@ namespace llvm {
   class RegisterCoalescer;
   class raw_ostream;
 
-  /// NKim, createMachineProfilePathBuilderPass - Path profile allows creation
-  /// of profiles for IR structures such as BasicBlocks, Functions, etc. This
-  /// pass extracts and builds machine basic block paths from the profiling info
-  /// generated for the IR
-//  FunctionPass *createMachinePathProfileBuilderPass();
+  /// NKim, createMachineProfileLoaderPass - Create a pass for loading profile
+  /// information for machine functions, machine basic blocks and edges between
+  /// them
+  FunctionPass *createMachineProfileLoaderPass();
 
   /// NKim, createSuperblockFormationPass - After the profiled paths have been
   /// reconstructed, a superblock formation can take place which identifies the

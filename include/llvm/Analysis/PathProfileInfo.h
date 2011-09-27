@@ -17,6 +17,7 @@
 #include "llvm/BasicBlock.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/Analysis/PathNumbering.h"
+#include "llvm/Analysis/ProfileInfo.h"
 #include <stack>
 #include <list>
 
@@ -160,44 +161,6 @@ private:
   Function* _currentFunction;
 
   friend class ProfilePath;
-};
-
-//-----------------------------------------------------------------------------
-
-class MachinePathProfileInfo {
-public:
-
-  /// Types
-  typedef MachineProfilePathMap::iterator iterator;
-  typedef MachineProfilePathMap::const_iterator const_iterator;
-  typedef MachineProfilePathMap::reverse_iterator reverse_iterator;
-
-protected:
-
-  MachineProfilePathMap MachineProfilePaths;
-
-public:
-
-  static char ID;
-
-  MachinePathProfileInfo() {}
-  ~MachinePathProfileInfo() {}
-
-  /// Iterators
-
-  iterator begin() { return MachineProfilePaths.begin(); }
-  const_iterator begin() const { return MachineProfilePaths.begin(); }
-
-  iterator end() { return MachineProfilePaths.end(); }
-  const_iterator end() const { return MachineProfilePaths.end(); }
-
-  reverse_iterator rbegin() { return MachineProfilePaths.rbegin(); }
-  reverse_iterator rend() { return MachineProfilePaths.rend(); }
-
-  /// Simple accessors (readonly)
-
-  bool isEmpty() const { return !MachineProfilePaths.size(); }
-  unsigned size() const { return MachineProfilePaths.size(); }
 };
 
 } // end namespace llvm

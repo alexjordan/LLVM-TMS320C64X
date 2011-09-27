@@ -32,9 +32,9 @@ using namespace llvm;
 STATISTIC(NumEdgesRead, "The # of edges read.");
 
 static cl::opt<std::string>
-ProfileInfoFilename("profile-info-file", cl::init("llvmprof.out"),
-                    cl::value_desc("filename"),
-                    cl::desc("Profile file loaded by -profile-loader"));
+ProfileInfoFilename("edge-profile-info-file", cl::init("llvm-edge-prof.out"),
+  cl::value_desc("filename"),
+  cl::desc("Profile file containing edge/block profile information"));
 
 namespace {
   class LoaderPass : public ModulePass, public ProfileInfo {
@@ -160,6 +160,7 @@ bool LoaderPass::runOnModule(Module &M) {
     ReadCount = 0;
     for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
       if (F->isDeclaration()) continue;
+
       DEBUG(dbgs()<<"Working on "<<F->getNameStr()<<"\n");
       readEdge(getEdge(0,&F->getEntryBlock()), Counters);
       for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {

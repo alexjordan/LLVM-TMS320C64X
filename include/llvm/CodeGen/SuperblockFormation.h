@@ -16,8 +16,8 @@
 
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineSuperBlock.h"
-#include "llvm/CodeGen/MachinePathProfileBuilder.h"
+#include "llvm/CodeGen/MachineRegions.h"
+#include "llvm/CodeGen/MachineProfileAnalysis.h"
 #include "llvm/ADT/DenseMap.h"
 
 // stl stuff
@@ -39,7 +39,8 @@ class TargetInstrInfo;
 
 //----------------------------------------------------------------------------
 
-typedef std::set<MachineSuperBlock*> MachineSuperBlockSetTy;
+typedef MachineSingleEntryPathRegion MachineSuperBlock;
+typedef std::multimap<unsigned, MachineSuperBlock*> MachineSuperBlockMapTy;
 typedef std::pair<MachineBasicBlock*, MachineBasicBlock*> MBBPairTy;
 typedef std::pair<MachineBasicBlock*, unsigned> MBBValPairTy;
 typedef std::vector<MBBValPairTy> ValueVectorTy;
@@ -63,10 +64,9 @@ class SuperblockFormation : public MachineFunctionPass {
     DenseMap<unsigned, ValueVectorTy> SSAUpdateVals;
     SmallVector<unsigned, 256> SSAUpdateVirtRegs;
 
-    /// this a set we store all created/identified non-trivial superblocks in.
-    /// For the time being we offer a simple set only (for simplicity) but may
-    /// provide a more sophisticated and adapted container later
-    MachineSuperBlockSetTy superBlocks;
+    /// this is a map we store all created/identified nontrivial superblocks
+    /// in. We use the execution count of the trace as a key to the multimap
+    static MachineSuperBlockMapTy superBlocks;
 
     /// this is a temporary container that helps keeing track of machine bbs
     /// that have been processed already and can be (or actually must not be)
@@ -77,7 +77,7 @@ class SuperblockFormation : public MachineFunctionPass {
 
     /// this helper is required to drop all collected/created superblocks ni-
     /// cely without creeating memory-leaks
-    void clearSuperblockSet();
+    void clearSuperblockMap();
 
     /// this method examines the specified profiled execution-path and tries
     /// to create superblocks. This includes checks for constraints and then
@@ -153,8 +153,8 @@ class SuperblockFormation : public MachineFunctionPass {
     virtual bool runOnMachineFunction(MachineFunction &F);
     virtual void getAnalysisUsage(AnalysisUsage &AU) const;
 
-    /// get the entire set of created superblocks at once
-    const MachineSuperBlockSetTy &getSuperblocks() const;
+    /// get the entire map of created superblocks at once
+    static const MachineSuperBlockMapTy &getSuperblocks();
 };
 
 } // llvm namespace

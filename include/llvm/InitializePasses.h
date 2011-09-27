@@ -151,8 +151,13 @@ void initializeMachineLoopInfoPass(PassRegistry&);
 void initializeMachineLoopRangesPass(PassRegistry&);
 void initializeMachineModuleInfoPass(PassRegistry&);
 
+// NKim, create a separate analysis group for the profiler
+void initializeMachineProfileAnalysisAnalysisGroup(PassRegistry&);
+
+// NKim, profile-path reconstructor for the machine code
+void initializeMachineProfileLoaderPass(PassRegistry&);
+
 // NKim
-void initializeMachinePathProfileBuilderPass(PassRegistry&);
 void initializeSuperblockFormationPass(PassRegistry&);
 
 void initializeMachineSinkingPass(PassRegistry&);

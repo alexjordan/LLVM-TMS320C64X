@@ -122,6 +122,8 @@ namespace llvm {
     }
 
     void setEdgeWeight(Edge e, double w) {
+      dbgs() << "setting edge weights...\n";
+
       DEBUG_WITH_TYPE("profile-info",
             dbgs() << "Creating Edge " << e
                    << " (weight: " << format("%.20g",w) << ")\n");
@@ -242,7 +244,6 @@ namespace llvm {
   /// profiling information for the module from the specified filename, making
   /// it available to the optimizers.
   Pass *createProfileLoaderPass(const std::string &Filename);
-
 } // End llvm namespace
 
 #endif

@@ -16,11 +16,11 @@
 #include "llvm/Analysis/Verifier.h"
 #include "llvm/Assembly/PrintModulePass.h"
 #include "llvm/CodeGen/AsmPrinter.h"
+#include "llvm/CodeGen/MachineProfileAnalysis.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/GCStrategy.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/MachinePathProfileBuilder.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -43,13 +43,13 @@ namespace llvm {
 }
 
 // NKim
-static cl::opt<bool> EnablePathProfileLoader("load-path-profile-info",
-    cl::Hidden, cl::desc("Load path profile information from file"),
-    cl::init(false));
+static cl::opt<bool> EnableEdgeProfileLoader("load-edge-profile",
+  cl::Hidden, cl::desc("Load edge profile information from file"),
+  cl::init(false));
 
 // NKim
-static cl::opt<bool> EnablePathReconstruction("reconstruct-profile-paths",
-    cl::Hidden, cl::desc("Reconstruct profile paths from the profile"),
+static cl::opt<bool> EnablePathProfileLoader("load-path-profile",
+    cl::Hidden, cl::desc("Load path profile information from file"),
     cl::init(false));
 
 // NKim
@@ -340,11 +340,29 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
 
   // Standard Lower-Level Passes.
 
-  ModulePass *PathProfileLoaderPass = 0;
+  // NKim, create and run a path-profile-loader pass if required. The pass as
+  // such is passed to the pass-manager and additionally a reference is stored.
+  // this reference is then passed to the clients of this pass (f.e. superblock
+  // formation pass) to be able to use the profile-info. This is an ugly HACK.
+  //
+  // NOTE, if there is a much cleaner way to aquire this info (for example via
+  // the 'getAnalysis' template) let me know, for me it just didn't work (without
+  // reimplementing a great portion of the PathProfileInfo for the machine side),
+  // maybe due to the constraints between the IR and Machine passes
   if (EnablePathProfileLoader) {
-    // NKim, create and run a path-profile-loader pass if required
-    PathProfileLoaderPass = createPathProfileLoaderPass();
-    PM.add(PathProfileLoaderPass);
+    if (ModulePass *PathProfileLoader = createPathProfileLoaderPass()) {
+      MachineProfileAnalysis::PPI = (PathProfileInfo *)
+        PathProfileLoader->getAdjustedAnalysisPointer(&PathProfileInfo::ID);
+      PM.add(PathProfileLoader);
+    }
+  }
+
+  if (EnableEdgeProfileLoader) {
+    if (ModulePass *EdgeProfileLoader = createProfileLoaderPass()) {
+      MachineProfileAnalysis::EPI = (ProfileInfo *)
+        EdgeProfileLoader->getAdjustedAnalysisPointer(&ProfileInfo::ID);
+      PM.add(EdgeProfileLoader);
+    }
   }
 
   // Install a MachineModuleInfo class, which is an immutable pass that holds
@@ -381,17 +399,13 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   // to one another and simplify frame index references where possible.
   PM.add(createLocalStackSlotAllocationPass());
 
-  // NKim, try to reconstruct/create machine basic block paths from the
-  // profile information (which of course is required to be loaded first)
-  // After we have reconstructed paths for the machine basic blocks, we can
-  // perform a creation of superblocks if desired
-  if (BuildSuperblocks) {
-    MachinePathProfileBuilder *MPB = new MachinePathProfileBuilder();
-    MPB->setPathProfileInfo(PathProfileLoaderPass);
-    PM.add(MPB);
+  // NKim, try to build superblocks from the reconstructed profile data
+  if (BuildSuperblocks) PM.add(createSuperblockFormationPass());
 
-    PM.add(createSuperblockFormationPass());
-  }
+  /// NKim - this is a hook the targets can use to insert their own passes,
+  /// which need to be run soon after the ISel, but before the regAlloc or
+  /// the pre-regalloc-scheduler
+  addPostISel(PM, OptLevel);
 
   if (OptLevel != CodeGenOpt::None) {
     // With optimization, dead code should already be eliminated. However
