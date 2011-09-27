@@ -78,6 +78,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
 
     bool handleSoftFloatCall(const char* SymbolName);
     void refSymbol(MCSymbol *Sym);
+    void refContents(Constant *C);
 
     bool print_predicate(const MachineInstr *MI,
                          raw_ostream &OS,
@@ -464,14 +465,18 @@ void TMS320C64XAsmPrinter::EmitGlobalVariable(const GlobalVariable *GVar) {
 
   EmitAlignment(align, GVar);
 
+  // TI assembler does not support this
   if (MAI->hasDotTypeDotSizeDirective()) {
     OS << "\t.type " << NameStr << ",#object\n";
     OS << "\t.size " << NameStr << ',' << sz << '\n';
   }
 
   OS << NameStr << ":\n";
-
   OutStreamer.EmitRawText(OS.str());
+
+  // if it contains any declarations, .ref them
+  refContents(C);
+
   EmitGlobalConstant(C);
 }
 
@@ -640,6 +645,16 @@ void TMS320C64XAsmPrinter::refSymbol(MCSymbol *MCSym) {
   MachineModuleInfoImpl::StubValueTy &StubSym = MMIMachO.getFnStubEntry(MCSym);
   if (StubSym.getPointer() == 0)
     StubSym = MachineModuleInfoImpl::StubValueTy(MCSym, false);
+}
+
+//-----------------------------------------------------------------------------
+
+void TMS320C64XAsmPrinter::refContents(Constant *C) {
+  for (unsigned i = 0, e = C->getNumOperands(); i != e; ++i) {
+  if (const GlobalValue *GV = dyn_cast<GlobalValue>(C->getOperand(i)))
+    if (GV->isDeclaration())
+      refSymbol(Mang->getSymbol(GV));
+  }
 }
 
 //-----------------------------------------------------------------------------
