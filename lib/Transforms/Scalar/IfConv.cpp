@@ -32,7 +32,9 @@ using namespace IfConv;
 #define WFMT(w) \
   (llvm::format("%2.5f", w))
 
-STATISTIC(NumSimpl, "Number of conditions predicated");
+STATISTIC(NumSimpl, "Number of branches removed");
+STATISTIC(HoistCnt, "Number of blocks hoisted");
+STATISTIC(CostPreventedCnt, "If-conversions prevented by cost estimation");
 
 static cl::opt<bool>
 DumpCFG("ifconv-dot-cfg", cl::init(false), cl::Hidden,
@@ -324,8 +326,10 @@ bool IfConvPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
   bool TruePred[2];
 
   Oracle oracle(PI);
-  if (!oracle.shouldConvert(DomBlock, IfBlock1, IfBlock2))
+  if (!oracle.shouldConvert(DomBlock, IfBlock1, IfBlock2)) {
+    ++CostPreventedCnt;
     return false;
+  }
 
   if (IfBlock1) {
     oracle.analyze(IfBlock1, BBInfo[0]);
@@ -336,6 +340,7 @@ bool IfConvPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
         IfBlock1->getTerminator());
 
     TruePred[0] = IfBlock1 == IfTrue;
+    HoistCnt++;
   }
   if (IfBlock2) {
     oracle.analyze(IfBlock2, BBInfo[1]);
@@ -346,6 +351,7 @@ bool IfConvPass::convertPHIs(BasicBlock *BB, PHINode *PN) {
         IfBlock2->getTerminator());
 
     TruePred[1] = IfBlock2 == IfTrue;
+    HoistCnt++;
   }
 
   if (IfBlock1 && IfBlock2)
@@ -511,10 +517,16 @@ bool IfConvPass::convertBranch(BasicBlock *BB) {
     if (hasDependentPHI(BBcond))
       continue;
 
+    Oracle oracle(PI);
+
+    if (!oracle.shouldConvert(BB, BBcond, NULL)) {
+      ++CostPreventedCnt;
+      continue;
+    }
+
     DEBUG(dbgs() << "hoisting: " << BBcond->getName() << " into "
           << BB->getName() << "\n");
     BlockInfo BBInfo;
-    Oracle oracle(PI);
     oracle.analyze(BBcond, BBInfo);
     assert(BBInfo.Convertible);
 
@@ -528,6 +540,7 @@ bool IfConvPass::convertBranch(BasicBlock *BB) {
         BBcond->getTerminator());
     BB->getParent()->dump();
     Changed |= true;
+    HoistCnt++;
   }
 
   return Changed;
@@ -588,9 +601,6 @@ bool IfConvPass::predicate(Function &F) {
 
   if (Changed)
     return true;
-
-  DEBUG(dbgs() << "-- now looking for branches --\n");
-  DEBUG(F.dump());
 
   Function::BasicBlockListType &BBs = F.getBasicBlockList();
   for (Function::BasicBlockListType::reverse_iterator I = BBs.rbegin(),
