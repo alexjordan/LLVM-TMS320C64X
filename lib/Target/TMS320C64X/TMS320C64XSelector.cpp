@@ -35,6 +35,7 @@
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/CommandLine.h"
 
@@ -90,7 +91,7 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
   unsigned int align, want_align;
   int offset;
 
-//	DebugLoc dl = DebugLoc::getUnknownLoc();
+//  DebugLoc dl = DebugLoc::getUnknownLoc();
 
   // must be sufficient
   DebugLoc dl;
@@ -99,6 +100,10 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
   // so bounce those to select_idxaddr
   if (N.getOpcode() == ISD::FrameIndex)
     return select_idxaddr(op, N, base, offs);
+
+  //dbgs() << "selecting address for: ";
+  //op->dump(CurDAG);
+  //N->dumpr(CurDAG);
 
   if (N.getOpcode() == ISD::TargetExternalSymbol ||
       N.getOpcode() == ISD::TargetGlobalAddress)
@@ -110,141 +115,143 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
   align = mem->getAlignment();
 
   if (!mem->getMemoryVT().isInteger()) {
-		llvm_unreachable("Memory access on non integer type\n");
-	} else if (!mem->getMemoryVT().isSimple()) {
-		llvm_unreachable("Memory access on non-simple type\n");
-	} else {
-		want_align = mem->getMemoryVT().getSimpleVT().getSizeInBits();
-		want_align /= 8;
+    llvm_unreachable("Memory access on non integer type\n");
+  } else if (!mem->getMemoryVT().isSimple()) {
+    llvm_unreachable("Memory access on non-simple type\n");
+  } else {
+    want_align = mem->getMemoryVT().getSimpleVT().getSizeInBits();
+    want_align /= 8;
 
-		if (align < want_align) {
-			llvm_unreachable("Insufficient alignment on "
-					"memory access");
-		}
-	}
+    if (align < want_align) {
+      llvm_unreachable("Insufficient alignment on "
+          "memory access");
+    }
+  }
 
-	if (N.getNode()->getNumOperands() == 0 ||
-		N.getOperand(0).getOpcode() == ISD::TargetGlobalAddress ||
-		N.getOperand(0).getOpcode() == ISD::TargetExternalSymbol) {
-		// Node is a constant (no other operands), OR,
-		// Operand 0 is a global address, the node itself is a TMSISD
-		// wrapper which'll get lowered into a mvkl/mvkh pair later.
-		// So, we can allow the raw node to become the base address
-		// safely.
-		base = N;
-		offs = CurDAG->getTargetConstant(0, MVT::i32);
-		return true;
-	} else if (N.getNumOperands() == 1) {
-		// Something unpleasent - leave addr as it is, 0 offset
-		base = N.getOperand(0);
-		offs = CurDAG->getTargetConstant(0, MVT::i32);
-		return true;
-	}
+  //dbgs() << "align: " << align << "\n";
+  //dbgs() << "want_align: " << want_align << "\n";
 
-	if (N.getOperand(1).getOpcode() == ISD::Constant &&
-		(N.getOpcode() == ISD::ADD || N.getOpcode() == ISD::SUB)) {
-		if (TMS320C64XInstrInfo::Predicate_uconst_n(
-                  N.getOperand(1).getNode(), (int)log2(want_align) + 5))
-                {
-			// This is valid in a single instruction. Offset operand
-			// will be analysed by asm printer to detect the correct
-			// addressing mode to print. The assembler will scale
-			// the constant appropriately.
-			CN = cast<ConstantSDNode>(N.getOperand(1));
-			offset = CN->getSExtValue();
+  if (N.getNode()->getNumOperands() == 0 ||
+    N.getOperand(0).getOpcode() == ISD::TargetGlobalAddress ||
+    N.getOperand(0).getOpcode() == ISD::TargetExternalSymbol) {
+    // Node is a constant (no other operands), OR,
+    // Operand 0 is a global address, the node itself is a TMSISD
+    // wrapper which'll get lowered into a mvkl/mvkh pair later.
+    // So, we can allow the raw node to become the base address
+    // safely.
+    base = N;
+    offs = CurDAG->getTargetConstant(0, MVT::i32);
+    return true;
+  } else if (N.getNumOperands() == 1) {
+    // Something unpleasent - leave addr as it is, 0 offset
+    base = N.getOperand(0);
+    offs = CurDAG->getTargetConstant(0, MVT::i32);
+    return true;
+  }
 
-			if (N.getOpcode() == ISD::SUB)
-				offset = -offset;
+  if (N.getOperand(1).getOpcode() == ISD::Constant &&
+      (N.getOpcode() == ISD::ADD || N.getOpcode() == ISD::SUB)) {
+    if (TMS320C64XInstrInfo::Predicate_uconst_n(
+          N.getOperand(1).getNode(), (int)log2(want_align) + 5))
+    {
+      // This is valid in a single instruction. Offset operand
+      // will be analysed by asm printer to detect the correct
+      // addressing mode to print. The assembler will scale
+      // the constant appropriately.
+      CN = cast<ConstantSDNode>(N.getOperand(1));
+      offset = CN->getSExtValue();
 
-			base = N.getOperand(0);
-			offs = CurDAG->getTargetConstant(offset, MVT::i32);
-			return true;
-		}
-                else if (N.getOpcode() == ISD::ADD &&
-		   TMS320C64XInstrInfo::Predicate_const_is_positive(
+      if (N.getOpcode() == ISD::SUB)
+        offset = -offset;
+
+      // convert (scale) the offset into words
+      offset >>= (int) log2(want_align);
+
+      base = N.getOperand(0);
+      offs = CurDAG->getTargetConstant(offset, MVT::i32);
+      return true;
+    }
+    // XXX disabled b/c broken
+#if 0
+    else if (N.getOpcode() == ISD::ADD &&
+       TMS320C64XInstrInfo::Predicate_const_is_positive(
                      N.getOperand(1).getNode()),
-		   TMS320C64XInstrInfo::Predicate_uconst_n(
-                     N.getOperand(1).getNode(),	((int)log2(want_align)) + 15))
-                {
-			// We can use the uconst15 form of this instruction.
-			// Again, the assembler will scale this for us. Could
-			// put in some clauses to find sub insns with negative
-			// offsets, but I guess llvm might do that for us.
-			base = N.getOperand(0);
-			offs = N.getOperand(1);
+       TMS320C64XInstrInfo::Predicate_uconst_n(
+                     N.getOperand(1).getNode(), ((int)log2(want_align)) + 15))
+    {
+      // AJO - the ucst15 variant of a load can only use B14/B15(!) as base
+      // reg, so this cannot be correct!?
 
-			return true;
-		} else {
-			// Too big - load into register. Because the processor
-			// scales the offset, even when its being used as an
-			// offset in a register, we need to shift what gets
-			// loaded at this point.
-			base = N.getOperand(0);
-			CN = cast<ConstantSDNode>(N.getOperand(1));
-			offset = CN->getSExtValue();
+      base = N.getOperand(0);
+      offs = N.getOperand(1);
 
-			if (offset & ((1 << (int)log2(want_align)) - 1)) {
-				// Offset doesn't honour alignment rules.
-				// Ideally we should now morph to using a
-				// nonaligned memory instruction, but for now
-				// leave this as unsupported
-				llvm_unreachable("jmorse: unaligned offset to "
-					"memory access, implement swapping to "
-					"nonaligned instructions\n");
-				return false;
-			}
+      return true;
+    }
+#endif
+    else {
+      // Too big - load into register. Because the processor
+      // scales the offset, even when its being used as an
+      // offset in a register, we need to shift what gets
+      // loaded at this point.
+      base = N.getOperand(0);
+      CN = cast<ConstantSDNode>(N.getOperand(1));
+      offset = CN->getSExtValue();
 
-			// XXX - there was some code here that attempted to load
-			// the offs operand into a register and then pump it out
-			// however this wasn't valid - LLVM doesn't expect new
-			// SDNodes to occur as a result of selection. Removing
-			// this should have caused some offset-too-large
-			// complaints from the assembler.. but didn't. So I can
-			// only assume that this is munging offsets into a
-			// register or otherwise doing something unexpected. In
-			// either case, memory access beating needs to be
-			// rewritten, again.
-			offs = N.getOperand(1);
-			return true;
-		}
-	} else if (N.getOpcode() == ISD::ADD) {
-		// No constant offset, so values will be in registers when
-		// the get to us. XXX: is operand(1) always the constant, or
-		// can it be in 0 too?
+      if (offset & ((1 << (int)log2(want_align)) - 1)) {
+        // Offset doesn't honour alignment rules.
+        // Ideally we should now morph to using a
+        // nonaligned memory instruction, but for now
+        // leave this as unsupported
+        llvm_unreachable("jmorse: unaligned offset to "
+          "memory access, implement swapping to "
+          "nonaligned instructions\n");
+        return false;
+      }
 
-		// We can use operand as index if it's add - just leave
-		// as 2nd operand. Could also implement allowing subtract,
-		// but this means passing addressing mode information down
-		// to the assembly printer, which I suspect will mean pain.
+      // convert (scale) the offset into words and use a constant
+      // (not target constant!), to load into register.
+      offs = CurDAG->getConstant(offset >> (int) log2(want_align), MVT::i32);
+      offs = SDValue(SelectCode(offs.getNode()), 0);
+      return true;
+    }
+  } else if (N.getOpcode() == ISD::ADD) {
+    // No constant offset, so values will be in registers when
+    // the get to us. XXX: is operand(1) always the constant, or
+    // can it be in 0 too?
 
-		// As mentioned above though, hardware will scale the offset,
-		// so we need to insert a shift here.
-		base = N.getOperand(0);
-		SDValue ops[4];
-		ops[0] = N.getOperand(1);
-		ops[1] = CurDAG->getTargetConstant((int)log2(align), MVT::i32);
-		ops[2] = CurDAG->getTargetConstant(-1, MVT::i32);
-		ops[3] = CurDAG->getRegister(TMS320C64X::NoRegister, MVT::i32);
-		offs = CurDAG->getNode(ISD::SRA, dl, MVT::i32, ops, 4);
+    // We can use operand as index if it's add - just leave
+    // as 2nd operand. Could also implement allowing subtract,
+    // but this means passing addressing mode information down
+    // to the assembly printer, which I suspect will mean pain.
 
-		// That's a MI instruction and we're in the middle of depth
-		// first instruction selection, this won't get selected. So,
-		// make that happen manually.
-		offs = SDValue(SelectCode(offs.getNode()), 0);
-		return true;
-	} else {
-		// Doesn't match anything we recognize at all, use address
-		// as it is (aka let llvm deal with it), set offset to zero
-		// to ensure it doesn't intefere with address calculation.
-		base = N;
-		offs = CurDAG->getTargetConstant(0, MVT::i32);
-		return true;
-	}
+    // As mentioned above though, hardware will scale the offset,
+    // so we need to insert a shift here.
+    base = N.getOperand(0);
+    SDValue ops[4];
+    ops[0] = N.getOperand(1);
+    ops[1] = CurDAG->getTargetConstant((int)log2(align), MVT::i32);
+    ops[2] = CurDAG->getTargetConstant(-1, MVT::i32);
+    ops[3] = CurDAG->getRegister(TMS320C64X::NoRegister, MVT::i32);
+    offs = CurDAG->getNode(ISD::SRA, dl, MVT::i32, ops, 4);
 
-	// Initially concerning that all of the above return true - however this
-	// is after all the address selection code, and anything is valid for
-	// an address, all we're doing here is shortening the calculations for
-	// some forms.
+    // That's a MI instruction and we're in the middle of depth
+    // first instruction selection, this won't get selected. So,
+    // make that happen manually.
+    offs = SDValue(SelectCode(offs.getNode()), 0);
+    return true;
+  } else {
+    // Doesn't match anything we recognize at all, use address
+    // as it is (aka let llvm deal with it), set offset to zero
+    // to ensure it doesn't intefere with address calculation.
+    base = N;
+    offs = CurDAG->getTargetConstant(0, MVT::i32);
+    return true;
+  }
+
+  // Initially concerning that all of the above return true - however this
+  // is after all the address selection code, and anything is valid for
+  // an address, all we're doing here is shortening the calculations for
+  // some forms.
 }
 
 //-----------------------------------------------------------------------------
@@ -259,6 +266,10 @@ TMS320C64XInstSelectorPass::select_idxaddr(SDNode *&op,
   FrameIndexSDNode *FIN;
   unsigned int align, want_align;
   DebugLoc dl = op->getDebugLoc();
+
+  //dbgs() << "selecting IDX-address for: ";
+  //op->dump(CurDAG);
+  //addr->dumpr(CurDAG);
 
   if (op->getOpcode() == ISD::FrameIndex) {
     // Hackity hack: llvm wants the address of a stack slot. This
@@ -319,5 +330,9 @@ bool TMS320C64XInstSelectorPass::bounce_predicate(SDNode *&op,
 //-----------------------------------------------------------------------------
 
 SDNode * TMS320C64XInstSelectorPass::Select(SDNode *op) {
+  // We call Select() during address selection, so we might see nodes here that
+  // are already selected. ignore them.
+  if (op->isMachineOpcode())
+    return op;
   return SelectCode(op);
 }

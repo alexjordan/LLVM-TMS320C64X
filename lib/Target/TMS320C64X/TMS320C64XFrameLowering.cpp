@@ -131,7 +131,7 @@ void TMS320C64XFrameLowering::emitEpilogue(MachineFunction &MF,
       TMS320C64XInstrInfo::addDefaultPred(
         BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::word_load_1))
         .addReg(TMS320C64X::B3, RegState::Define).addReg(TMS320C64X::A15)
-        .addImm(-4)), TMS320C64XII::unit_d, true);
+        .addImm(-1)), TMS320C64XII::unit_d, true);
 
     TMS320C64XInstrInfo::addDefaultPred(
       BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::mv))

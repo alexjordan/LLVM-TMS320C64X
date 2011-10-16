@@ -170,10 +170,9 @@ TMS320C64XRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MBBI,
   else if (TMS320C64XInstrInfo::check_uconst_fits(abs(offs),
                                       5 + access_alignment))
   {
-    // We can just punt this constant into the instruction and
-    // it'll be scaled appropriately
+    // Constant fits into instruction but needs to be scaled.
 
-    MI.getOperand(i).ChangeToImmediate(offs);
+    MI.getOperand(i).ChangeToImmediate(offs >> access_alignment);
     return;
   }
 

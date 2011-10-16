@@ -586,10 +586,11 @@ void TMS320C64XAsmPrinter::printMemOperand(const MachineInstr *MI,
   printOperand(MI, op_num, OS);
 
   // Don't print zero offset, and if it's an immediate always print
-  // a positive offset */
+  // a positive offset. Offset is expected to be scaled, use '[]',
+  // never use non-scaled braces '()'.
   if (MI->getOperand(op_num+1).isImm()) {
     if (offset != 0) {
-      OS << "(" << abs(offset) << ")";
+      OS << "[" << abs(offset) << "]";
     }
   }
   else {
