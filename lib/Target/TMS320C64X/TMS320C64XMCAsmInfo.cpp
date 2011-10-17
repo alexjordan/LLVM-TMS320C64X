@@ -61,8 +61,17 @@ TMS320C64XMCAsmInfoELF::TMS320C64XMCAsmInfoELF(const Target &T,
   Data32bitsDirective = "\t.word\t";
   Data64bitsDirective = 0;
   ZeroDirective = "\t.zero\t";
+
+  // In TI's assembler, the .string directive does not implicitly 0-terminate
+  // the string, but also does not support C escapes (\n, \t, etc.). The latter
+  // is taken care of by the asm printer, which in the presence of non-
+  // printable characters, emits the string as a series of .byte fields.
   AsciiDirective = "\t.string\t";
+
+  // The behavior of cstring (0-termination and escapes handled by assembler)
+  // corresponds with LLVM's AscizDirective.
   AscizDirective = "\t.cstring\t";
+
   WeakRefDirective = "\t.ref ";
 
   CommentString = ";";

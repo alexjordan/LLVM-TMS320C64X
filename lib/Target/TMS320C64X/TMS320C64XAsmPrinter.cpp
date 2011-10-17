@@ -441,7 +441,7 @@ void TMS320C64XAsmPrinter::EmitGlobalVariable(const GlobalVariable *GVar) {
   OutStreamer.SwitchSection(getObjFileLowering()
     .SectionForGlobal(GVar, Mang, TM));
 
-  SmallString<128> globalString;
+  SmallString<1024> globalString;
   raw_svector_ostream OS(globalString);
 
   if (C->isNullValue() && !GVar->hasSection()) {
@@ -451,33 +451,61 @@ void TMS320C64XAsmPrinter::EmitGlobalVariable(const GlobalVariable *GVar) {
       if (sz == 0) sz = 1;
 
       // XXX - .lcomm?
-      OS << "\t.bss\t" << NameStr << "," << sz;
+      OS << "\t.bss\t" << NameStr
+         << "," << sz << ", " << align;
+
       OutStreamer.EmitRawText(OS.str());
       return;
     }
   }
 
-  // Insert here - linkage foo. Requires: understanding linkage foo.
-  // Alignment gets generated in byte form, however we need to emit it
-  // in gas' bit form.
+  const ConstantArray *CVA = dyn_cast<ConstantArray>(C);
+  const bool isCharString = CVA && CVA->isString();
 
-  align = Log2_32(align);
 
-  EmitAlignment(align, GVar);
-
-  // TI assembler does not support this
-  if (MAI->hasDotTypeDotSizeDirective()) {
-    OS << "\t.type " << NameStr << ",#object\n";
-    OS << "\t.size " << NameStr << ',' << sz << '\n';
-  }
+  // TI assembler does not support this (remains here for reference)
+  //if (MAI->hasDotTypeDotSizeDirective()) {
+  //  OS << "\t.type " << NameStr << ",#object\n";
+  //  OS << "\t.size " << NameStr << ',' << sz << '\n';
+  //}
 
   OS << NameStr << ":\n";
+
+  /// NKim, handle the emission of character arrays aggregated into a string
+  /// manually here.
+  if (isCharString) {
+    bool stringIsPrintable = true;
+
+    // check whether the string contains any non-printable characters
+    // XXX could be improved by not falling back to the .byte sequence when
+    // .cstring (which allows for C escapes) is used.
+    for (unsigned i = 0, e = CVA->getNumOperands(); i != e; ++i) {
+      char charVal = cast<ConstantInt>(CVA->getOperand(i))->getZExtValue();
+      stringIsPrintable = stringIsPrintable && (isprint(charVal) || !charVal);
+    }
+
+    // if the string contains any non printable characters, we emit it as a
+    // sequential collection of bytes, since a simple .string/.cstring emis-
+    // sion does seem to work currently for our tool-chain
+    if (!stringIsPrintable) {
+      for (unsigned j = 0, e = CVA->getNumOperands(); j != e; ++j) {
+        char charVal = cast<ConstantInt>(CVA->getOperand(j))->getZExtValue();
+        OS << MAI->getData8bitsDirective() << (int) charVal << '\t';
+
+        if (std::isprint(charVal))
+          OS << MAI->getCommentString() << " '" << charVal << "'\n";
+        else OS << MAI->getCommentString() << " escape\n";
+      }
+
+      OutStreamer.EmitRawText(OS.str());
+      refContents(C);
+      return;
+    }
+  }
+
   OutStreamer.EmitRawText(OS.str());
-
-  // if it contains any declarations, .ref them
-  refContents(C);
-
   EmitGlobalConstant(C);
+  refContents(C);
 }
 
 //-----------------------------------------------------------------------------
