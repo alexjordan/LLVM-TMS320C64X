@@ -423,6 +423,47 @@ def : Pat<(tmsselect GPRegs:$false, GPRegs:$true, timm:$trueimm, predwrapper1:$t
 	  (mvselect GPRegs:$true, GPRegs:$false, imm:$trueimm, predwrapper1:$truereg)>;
 
 ///////////////////////////////////////////////////////////////////////////////
+// SPECIAL instructions                                                      //
+///////////////////////////////////////////////////////////////////////////////
+
+// byte swap, see instruction description
+
+def swap2 : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
+    "swap2\t.S1\t$src,\t$dst", [], 0, unit_s>;
+
+// swap4 goes on L units only
+def swap4 : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
+    "swap4\t.L1\t$src,\t$dst", [], 0, unit_l>;
+
+let hasDelaySlot = 1,
+    DelaySlots = 1 in
+{
+  def bitr : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
+  "bitr\t.M1\t$src,\t$dst", [], 0, unit_m>;
+}
+
+// strangely that does not work for the llvm-byteswap intrinsic, most probably
+// due to a sign/zero extension, however, the bitr instruction does work...
+// def : Pat<(i32 (bswap GPRegs:$src)), (swap4 (swap2 GPRegs:$src))>;
+def : Pat<(i32 (bswap GPRegs:$src)), (bitr GPRegs:$src)>;
+
+// TMS has a native NAND instruction which we may want to issue directly
+def andn : inst<(outs GPRegs:$dst),
+    (ins GPRegs:$src1, GPRegs:$src2, pred:$predReg),
+    "andn\t.L1\t$src1,\t$src2,\t$dst", [], 0, unit_l>;
+
+def : Pat<(i32 (not (and GPRegs:$src1, GPRegs:$src2))),
+    (andn GPRegs:$src1, GPRegs:$src2)>;
+
+// counting leading zeroes can be done pretty quickly by using lmbd
+def lmbd : inst<(outs GPRegs:$dst),
+    (ins GPRegs:$src1, GPRegs:$src2, pred:$predReg),
+    "lmbd\t.L1\t$src1,\t$src2,\t$dst", [], 0, unit_l>;
+
+// TODO define a pattern !
+
+
+///////////////////////////////////////////////////////////////////////////////
 // BRANCH instructions                                                       //
 ///////////////////////////////////////////////////////////////////////////////
 
