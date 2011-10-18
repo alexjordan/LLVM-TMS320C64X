@@ -118,13 +118,18 @@ void write_profiling_data(enum ProfilingType PT, unsigned *Start,
                           unsigned NumElements) {
   int PTy;
   int outFile = getOutFile();
+  int w1, w2, w3;
 
   /* Write out this record! */
   PTy = PT;
-  if( write(outFile, &PTy, sizeof(int)) < 0 ||
-      write(outFile, &NumElements, sizeof(unsigned)) < 0 ||
-      write(outFile, Start, NumElements*sizeof(unsigned)) < 0 ) {
+  w1 = write(outFile, (const char *) &PTy, sizeof(int));
+  w2 = write(outFile, (const char *) &NumElements, sizeof(unsigned));
+  w3 = write(outFile, (const char *) Start, NumElements*sizeof(unsigned));
+  if (w1 < 0 || w2 < 0 || w3 < 0) {
     fprintf(stderr,"error: unable to write to output file.");
     exit(0);
   }
+
+  printf("write_profiling_data: type=%d, elements=%u\n", PT, NumElements);
+  printf("written to file: %d/%d/%d\n", w1, w2, w3);
 }
