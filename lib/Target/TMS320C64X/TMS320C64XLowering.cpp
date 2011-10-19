@@ -172,8 +172,16 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setLibcallName(RTLIB::UDIV_I32, "__divu");
   setLibcallName(RTLIB::UREM_I32, "__remu");
 
-  // Support for FP lib from TI
   //
+  // Support for RT lib from TI
+  //
+
+  // Integer arithmetic
+  setLibcallCustom(RTLIB::SDIV_I32, "divi");
+  setLibcallCustom(RTLIB::UDIV_I32, "divu");
+  setLibcallCustom(RTLIB::SREM_I32, "remi");
+  setLibcallCustom(RTLIB::UREM_I32, "remu");
+
   // Single-precision floating-point arithmetic.
   setLibcallCustom(RTLIB::ADD_F32, "addf");
   setLibcallCustom(RTLIB::SUB_F32, "subf");
