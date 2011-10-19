@@ -72,6 +72,7 @@ class TMS320C64XLowering : public TargetLowering {
     ~TMS320C64XLowering();
 
     unsigned getFunctionAlignment(const Function *F) const;
+    virtual TargetRegisterClass *getRegClassFor(EVT VT) const;
     const char *getTargetNodeName(unsigned op) const;
 
     virtual

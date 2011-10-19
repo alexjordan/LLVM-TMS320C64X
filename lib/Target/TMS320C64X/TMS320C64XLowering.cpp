@@ -290,6 +290,17 @@ TMS320C64XLowering::~TMS320C64XLowering() {}
 
 //-----------------------------------------------------------------------------
 
+TargetRegisterClass *TMS320C64XLowering::getRegClassFor(EVT VT) const {
+  // depends whether we do cluster assignment or not
+  if (ST->enableClusterAssignment())
+    return TMS320C64X::GPRegsRegisterClass;
+  else
+    return TMS320C64X::ARegsRegisterClass; // everything on side A
+
+}
+
+//-----------------------------------------------------------------------------
+
 const char *TMS320C64XLowering::getTargetNodeName(unsigned op) const {
   switch (op) {
     default: return NULL;
