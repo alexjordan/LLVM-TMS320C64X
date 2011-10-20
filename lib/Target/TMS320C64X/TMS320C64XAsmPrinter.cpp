@@ -459,6 +459,11 @@ void TMS320C64XAsmPrinter::EmitGlobalVariable(const GlobalVariable *GVar) {
     }
   }
 
+  // prepend .global directive
+  if (GVar->hasExternalLinkage()) {
+    OS << MAI->getGlobalDirective() << NameStr << "\n";
+  }
+
   const ConstantArray *CVA = dyn_cast<ConstantArray>(C);
   const bool isCharString = CVA && CVA->isString();
 
