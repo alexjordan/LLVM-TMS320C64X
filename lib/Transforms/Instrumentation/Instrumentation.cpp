@@ -23,6 +23,7 @@ void llvm::initializeInstrumentation(PassRegistry &Registry) {
   initializeEdgeProfilerPass(Registry);
   initializeOptimalEdgeProfilerPass(Registry);
   initializePathProfilerPass(Registry);
+  initializeLibCallOverheadPass(Registry);
 }
 
 /// LLVMInitializeInstrumentation - C binding for

@@ -94,6 +94,7 @@ void initializeDominatorTreePass(PassRegistry&);
 void initializeEdgeBundlesPass(PassRegistry&);
 void initializeEdgeProfilerPass(PassRegistry&);
 void initializePathProfilerPass(PassRegistry&);
+void initializeLibCallOverheadPass(PassRegistry&);
 void initializeEarlyCSEPass(PassRegistry&);
 void initializeExpandISelPseudosPass(PassRegistry&);
 void initializeFindUsedTypesPass(PassRegistry&);
