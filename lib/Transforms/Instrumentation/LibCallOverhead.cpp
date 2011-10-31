@@ -166,6 +166,11 @@ bool LibCallOverhead::runOnModule(Module &M) {
             !(Callee->hasExternalLinkage()))
           continue;
 
+        if (Callee->getName().startswith("llvm.")) {
+          dbgs() << "skipping call: " << Callee->getName() << "\n";
+          continue;
+        }
+
         dbgs() << "found new call: " << Callee->getName() << "\n";
         Function *Wrapper = getOrCreateWrapper(CI, Callee);
         WrapperFuncs.insert(Wrapper);
