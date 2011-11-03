@@ -408,7 +408,10 @@ TMS320C64XLowering::LowerFormalArguments(SDValue Chain,
       case MVT::i16:
       case MVT::i32:
         if (!Ins[i].Used && (!isVarArg || i != last_fixed_arg)) {
-          if (arg_idx < 10) arg_idx++;
+          if (arg_idx < 10)
+            arg_idx++;
+          else
+            stack_offset += 4;
 
           InVals.push_back(DAG.getUNDEF(ObjectVT));
         }
