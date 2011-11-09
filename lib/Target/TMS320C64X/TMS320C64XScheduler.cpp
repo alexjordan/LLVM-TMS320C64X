@@ -165,29 +165,26 @@ static bool isSchedulingBoundary(const MachineInstr *MI,
 
 //-----------------------------------------------------------------------------
 
-/// addTerminatorInstr - Add one pseudo-instruction for every branch terminator
+/// addTerminatorInstr - Add one pseudo-instruction for every branch,
 /// so scheduling can keep track of the branch delays. The last pseudo
 /// instructions marks the actual end of the block schedule (TERM). Returns
 /// true if at least one of those instructions was added.
 
 bool TMS320C64XScheduler::addTerminatorInstr(MachineBasicBlock *MBB) {
-  MachineBasicBlock::iterator I = MBB->getFirstTerminator();
-  if (I == MBB->end())
-    return false;
-
   const TargetInstrInfo *TII = TM.getInstrInfo();
-
   DebugLoc dl;
+  unsigned count = 0;
 
-  while (I != MBB->end()) {
-    BuildMI(*MBB, ++I, dl, TII->get(TMS320C64X::BR_OCCURS));
-    // should now point to the next terminator (branch) or end()
-    assert(I == MBB->end() ||
-           ( I->getOpcode() != TMS320C64X::BR_OCCURS &&
-             I->getDesc().isTerminator()));
+  for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end(); I != E;) {
+    // XXX actually insert the pseudo-instruction after every branch: includes
+    // indirect calls and would also work with side-exit branches.
+    if (I->getDesc().isBranch()) {
+      BuildMI(*MBB, ++I, dl, TII->get(TMS320C64X::BR_OCCURS));
+      count++;
+    } else
+      ++I;
   }
-  // XXX are we supposed to call updateTerminator?
-  return true;
+  return count > 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -217,7 +214,8 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
     unsigned BlockCycles = 0;
 
     // do we add a TERM to the end of the block?
-    bool BlockHasTerm = addTerminatorInstr(MBB);
+    addTerminatorInstr(MBB);
+    bool BlockHasTerm = prior(MBB->end())->getOpcode() == TMS320C64X::BR_OCCURS;
 
     // Initialize register live-range state for scheduling in this block.
     Scheduler->StartBlock(MBB);
@@ -532,14 +530,14 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
   for (unsigned i = 0, e = SUnits.size(); i != e; ++i) {
     // we rely on the reverse ordering of SUnits
     const TargetInstrDesc &tid = SUnits[i].getInstr()->getDesc();
-    if (tid.isTerminator() || tid.isCall()) {
+    if (tid.isTerminator() || tid.isCall() || tid.isCall()) {
       // found something, add order dep
       if (nextBranch)
         nextBranch->addPred(SDep(&SUnits[i], SDep::Order, SUnits[i].Latency));
       nextBranch = &SUnits[i];
     }
     // all branch-related nodes need to be scheduled when becoming available
-    if (tid.isTerminator())
+    if (tid.isTerminator() || tid.isBranch())
       SUnits[i].isScheduleHigh = true;
 
     // remember when the first branch of the block occurs
