@@ -196,8 +196,14 @@ def shl_p_rr : pseudo_rr<"shl", ".S1", unit_s, shl, 0>;
 def shl_p_ri : pseudo_ri<"shl", ".S1", (i32 uconst5:$imm), unit_s, shl, 0>;
 def shr_p_rr : pseudo_rr<"shr", ".S1", unit_s, sra, 0>;
 def shr_p_ri : pseudo_ri<"shr", ".S1", (i32 uconst5:$imm), unit_s, sra, 0>;
-def rotl_p_rr : pseudo_rr<"rotl", ".M1", unit_m, rotl, 0>;
-def rotl_p_ri : pseudo_ri<"rotl", ".M1", (i32 uconst5:$imm), unit_m, rotl, 0>;
+
+let Itinerary = Multiply16,
+    DelaySlots = 1,
+    hasDelaySlot = 1 in
+{
+  def rotl_p_rr : pseudo_rr<"rotl", ".M1", unit_m, rotl, 0>;
+  def rotl_p_ri : pseudo_ri<"rotl", ".M1", (i32 uconst5:$imm), unit_m, rotl, 0>;
+}
 
 //Some arithmatic and logic
 

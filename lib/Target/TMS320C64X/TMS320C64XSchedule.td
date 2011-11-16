@@ -30,11 +30,12 @@ def D2 : FuncUnit;
 //===----------------------------------------------------------------------===//
 // Instruction Itinerary classes
 
-def Default : InstrItinClass;
-def Load : InstrItinClass;
-def Store : InstrItinClass;
-def Multiply : InstrItinClass;
-def Branch : InstrItinClass;
+def Default    : InstrItinClass;
+def Load       : InstrItinClass;
+def Store      : InstrItinClass;
+def Multiply   : InstrItinClass;
+def Multiply16 : InstrItinClass;
+def Branch     : InstrItinClass;
 
 //===----------------------------------------------------------------------===//
 // Instruction Itinerary classes
@@ -46,6 +47,7 @@ def TMS320X64XItineraries : ProcessorItineraries<
     InstrItinData<Load, [InstrStage<5, [D1, D2]>]>,     // 4 delay slots
     InstrItinData<Store, [InstrStage<1, [D1, D2]>]>,    // 0 delay slots
     InstrItinData<Multiply, [InstrStage<4, [M1, M2]>]>, // 3 delay slots
+    InstrItinData<Multiply16, [InstrStage<2, [M1, M2]>]>, // 1 delay slot
     InstrItinData<Branch, [InstrStage<6, [S1, S2]>]>    // 5 delay slots
   ]
 >;
