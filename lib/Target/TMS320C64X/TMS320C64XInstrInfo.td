@@ -302,7 +302,9 @@ let isMoveImm = 1 in
 // is not that important, since i doubt there will be many situations where it
 // would be more profitable compared to a regular non-delayed move
 
-let hasDelaySlot = 1, DelaySlots = 3 in
+let Itinerary = Multiply,
+    DelaySlots = 3,
+    hasDelaySlot = 1 in
 {
   def mvd : moveInstr<(outs GPRegs:$dst), (ins GPRegs:$src),
                       "mvd\t.M1\t$src,\t$dst", 0, unit_m>;
@@ -441,7 +443,8 @@ def swap2 : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
 def swap4 : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
     "swap4\t.L1\t$src,\t$dst", [], 0, unit_l>;
 
-let hasDelaySlot = 1,
+let Itinerary = Multiply16,
+    hasDelaySlot = 1,
     DelaySlots = 1 in
 {
   def bitr : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
