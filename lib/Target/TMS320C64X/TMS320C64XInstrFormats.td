@@ -259,15 +259,16 @@ class pseudoinst<dag outops, dag inops, string asm, list<dag> pat>
   //let isCodeGenOnly = 1;
 }
 
-class nopred_inst<dag outops,
-                  dag inops,
-                  string mnemonic,
-                  list<dag> pattern,
-		  bit side,
-                  InstUnit u> 
+// Instruction class that makes predicate operands ($a, $b) available for
+// matching. (eg. for conditional branches)
+class nodefaultpred_inst<dag outops,
+                         dag inops,
+                         string mnemonic,
+                         list<dag> pattern,
+                         bit side,
+                         InstUnit u>
 : inst<outops, inops, mnemonic, pattern, side, u>
 {
-//  let InOperandList = !con(ins, (ops nodefault_zflag:$a, nodefault_reg:$b));
   let InOperandList = !con(inops, (ins nodefault_zflag:$a, nodefault_reg:$b));
 }
 

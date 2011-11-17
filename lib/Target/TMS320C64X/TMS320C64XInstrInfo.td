@@ -422,7 +422,7 @@ def cmpltu_p_rr : pseudo_rr<"cmpltu", ".L1", unit_l, cmpltu_node, 0>;
 // the same register would achieve it with one cycle, but that involves touching
 // parallel stuff, which we're avoiding for now
 
-def mvselect : nopred_inst<(outs GPRegs:$dst), (ins GPRegs:$reg, GPRegs:$src1),
+def mvselect : nodefaultpred_inst<(outs GPRegs:$dst), (ins GPRegs:$reg, GPRegs:$src1),
 		"mv\t\t$reg,\t$dst", [], 0, unit_s> {
 	let Constraints = "$src1 = $dst";
 }
@@ -485,6 +485,12 @@ let isBranch = 1,
     DelaySlots = 5,
     hasDelaySlot = 1 in
 {
+
+// the following unconditional calls are barriers (ie. execution stops with the
+// branch; as in other cases, this property does not (need to) hold after
+// post-pass scheduling, b/c of delay slots)
+let isBarrier = 1 in
+{
   def branch : inst<(outs), (ins BranchTargetOperand:$block),
                     "b\t$block", [(br bb:$block)], 0, unit_s>
   {
@@ -496,15 +502,16 @@ let isBranch = 1,
 
   def branch_B : inst<(outs), (ins BranchTargetOperand:$block),
                       "b\t.S2\t$block", [(br bb:$block)], 1, unit_s>;
+} // isBarrier
 
-  // conditional branches are being declared as non-predicated...
-  // i am not sure whether the codegen respects this properly...
-  def branch_cond : nopred_inst<(outs), (ins BranchTargetOperand:$block), 
+  // nodefaultpred_inst: predicate operands are added manually
+  def branch_cond : nodefaultpred_inst<(outs), (ins BranchTargetOperand:$block),
                       "b\t.S1\t$block",
                        [(brcond_node bb:$block, timm:$a, predwrapper1:$b)],
                        0, unit_s>
   {
     let Pattern = sched_pattern;
+    // not a barrier
   }
 
   // indirect (register) branches
@@ -513,6 +520,8 @@ let isBranch = 1,
                          [(brind GPRegs:$reg)], 1, unit_s>
   {
     let Pattern = sched_pattern;
+    // XXX barrier, or can be conditional?
+    let isBarrier = 1;
   }
 } // isBranch
 
@@ -571,6 +580,7 @@ def call_reg : inst<(outs), (ins GPRegs:$reg, variable_ops),
 def ret : inst<(outs), (ins), "b\t.S2\tB3", [(retflag)], 1, unit_s> {
         let isReturn = 1;
         let isTerminator = 1;
+        let isBarrier = 1;
         let isPredicable = 0;
         let Pattern = sched_pattern;
 

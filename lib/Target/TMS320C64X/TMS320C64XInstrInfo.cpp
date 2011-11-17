@@ -321,8 +321,22 @@ TMS320C64XInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
   MachineInstr *LastInstr = I;
 
-  // the machine basic block falls through (no branches)
-  if (!(LastInstr->getDesc().isBranch())) return false;
+  // we can't analyze branches after post-RA scheduling.
+  // (-verify-machineinstrs will try this though)
+  if (LastInstr->getOpcode() == TMS320C64X::BUNDLE_END)
+    return true;
+
+  if (!(LastInstr->getDesc().isBranch())) {
+    if (LastInstr->getDesc().isBarrier())
+      // block ends with a return (ret)
+      return true;
+
+    // no other terminators expected
+    assert(!LastInstr->getDesc().isTerminator());
+
+    // the machine basic block falls through (no branches)
+    return false;
+  }
 
   /// here we can be sure to be dealing with a regular branch-instruction.
   /// NOTE, we do not consider a return to be a branch ! Now to be able to
@@ -332,8 +346,10 @@ TMS320C64XInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   const int lastOpcode = LastInstr->getOpcode();
   const bool lastIsCond = lastOpcode == TMS320C64X::branch_cond;
 
+  MachineInstr *SecLastInstr;
+
   // there is only one branch instruction in the basic block
-  if (I == MBB.begin() || !isUnpredicatedTerminator(--I)) {
+  if (I == MBB.begin() || !((SecLastInstr = --I)->getDesc().isBranch())) {
 
     if (!lastIsCond) {
 
@@ -359,7 +375,7 @@ TMS320C64XInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
       // have a predication for a conditional branch, which would lead to
       // a situation of having a conditional conditional branch...
 
-      if (TBB) FBB = TBB;
+      // case 3: only set TBB
       TBB = LastInstr->getOperand(0).getMBB();
 
       // store the conditions of the conditional jump
@@ -369,10 +385,9 @@ TMS320C64XInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
     return false;
   }
 
-  MachineInstr *SecLastInstr = I;
 
   // if there are 3 terminators, we don't know what sort of bb this is
-  if (SecLastInstr && I != MBB.begin() && isUnpredicatedTerminator(--I))
+  if (SecLastInstr && I != MBB.begin() && (--I)->getDesc().isTerminator())
     return true;
 
   const int secLastOpcode = SecLastInstr->getOpcode();
