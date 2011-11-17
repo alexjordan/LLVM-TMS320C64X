@@ -15,8 +15,6 @@
 namespace llvm {
 
   class TMS320C64XTargetObjectFile : public TargetLoweringObjectFileCOFF {
-    const MCSection *SmallDataSection;
-    const MCSection *SmallBSSSection;
   public:
 
     const MCSection *SelectSectionForGlobal(const GlobalValue *GV,
@@ -32,6 +30,8 @@ namespace llvm {
                                             SectionKind Kind,
                                             Mangler *Mang,
                                             const TargetMachine &TM) const;
+
+    const MCSection *getSectionForConstant(SectionKind Kind) const;
   };
 } // end namespace llvm
 

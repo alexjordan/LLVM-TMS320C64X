@@ -188,6 +188,9 @@ bool TMS320C64XAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
+  // Print out jump tables referenced by the function.
+  EmitJumpTableInfo();
+
   return false;
 }
 
@@ -575,7 +578,8 @@ void TMS320C64XAsmPrinter::printOperand(const MachineInstr *MI,
       break;
 
     case MachineOperand::MO_JumpTableIndex:
-      OS << (int)MO.getIndex();
+      OS << MAI->getPrivateGlobalPrefix() << "JTI" << getFunctionNumber()
+        << '_' << MO.getIndex();
       break;
 
     case MachineOperand::MO_ConstantPoolIndex:

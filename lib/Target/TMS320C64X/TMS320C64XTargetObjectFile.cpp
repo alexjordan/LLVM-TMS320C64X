@@ -13,8 +13,9 @@
 #include "llvm/Target/TargetMachine.h"
 using namespace llvm;
 
-// We can't properly define sections, neither in COFF nor in ELF. So for both
-// formats we simply use .text and .data for everything.
+// There is no easy way for us to define the section printing format the TI
+// assembler expects w/o changes in MC/*. So for both COFF and ELF we simply use
+// .text and .data for everything.
 
 const MCSection *TMS320C64XTargetObjectFile::
 SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
@@ -30,6 +31,14 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
                        Mangler *Mang, const TargetMachine &TM) const {
   if (Kind.isText())
     return getTextSection();
+
+  return getDataSection();
+}
+
+const MCSection *
+TMS320C64XTargetObjectFileELF:: getSectionForConstant(SectionKind Kind) const {
+  // expected (and tested) for jumptables only
+  assert(Kind.isReadOnly());
 
   return getDataSection();
 }
