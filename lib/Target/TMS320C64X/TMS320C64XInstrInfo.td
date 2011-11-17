@@ -584,7 +584,10 @@ def ret : inst<(outs), (ins), "b\t.S2\tB3", [(retflag)], 1, unit_s> {
         let isPredicable = 0;
         let Pattern = sched_pattern;
 
-        let Uses = [B3]; // the return address
+        // The implicit use of the return address in B3:
+        //   let Uses = [B3];
+        // is not defined here but added when the epilogue is inserted.
+        // Otherwise early phases would lack the respective def of B3.
 
   let Itinerary = Branch;
   let hasDelaySlot = 1;

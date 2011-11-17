@@ -127,16 +127,22 @@ void TMS320C64XFrameLowering::emitEpilogue(MachineFunction &MF,
 
     // unbundled epilogue instructions (weaved into other bundles)
 
+    // restore return address (B3)
     TMS320C64XInstrInfo::addFormOp(
       TMS320C64XInstrInfo::addDefaultPred(
         BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::word_load_1))
         .addReg(TMS320C64X::B3, RegState::Define).addReg(TMS320C64X::A15)
         .addImm(-1)), TMS320C64XII::unit_d, true);
 
+    // add the (implicit) use of B3 to ret
+    MBBI->addOperand(MachineOperand::CreateReg(TMS320C64X::B3, false, true));
+
+    // reset stack pointer
     TMS320C64XInstrInfo::addDefaultPred(
       BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::mv))
       .addReg(TMS320C64X::B15, RegState::Define).addReg(TMS320C64X::A15));
 
+    // restore caller's frame pointer
     TMS320C64XInstrInfo::addFormOp(
       TMS320C64XInstrInfo::addDefaultPred(
         BuildMI(MBB, MBBI, DL, TII.get(TMS320C64X::word_load_1))
