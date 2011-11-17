@@ -22,7 +22,7 @@
 #include "AntiDepBreaker.h"
 #include "AggressiveAntiDepBreaker.h"
 #include "CriticalAntiDepBreaker.h"
-#include "llvm/CodeGen/ScheduleDAGInstrs.h"
+#include "llvm/CodeGen/SchedulePostRABase.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
@@ -105,7 +105,7 @@ namespace {
   };
   char PostRAScheduler::ID = 0;
 
-  class SchedulePostRATDList : public ScheduleDAGInstrs {
+  class SchedulePostRATDList : public SchedulePostRABase {
     /// AvailableQueue - The priority queue to use for the available SUnits.
     ///
     LatencyPriorityQueue AvailableQueue;
@@ -127,10 +127,6 @@ namespace {
 
     /// AA - AliasAnalysis for making memory reference queries.
     AliasAnalysis *AA;
-
-    /// KillIndices - The index of the most recent kill (proceding bottom-up),
-    /// or ~0u if the register is not live.
-    std::vector<unsigned> KillIndices;
 
   public:
     SchedulePostRATDList(
@@ -158,22 +154,14 @@ namespace {
     ///
     void FinishBlock();
 
-    /// FixupKills - Fix register kill flags that have been made
-    /// invalid due to scheduling
-    ///
-    void FixupKills(MachineBasicBlock *MBB);
+    // XXX not supported
+    unsigned getCycles() const { return 0; }
 
   private:
     void ReleaseSucc(SUnit *SU, SDep *SuccEdge);
     void ReleaseSuccessors(SUnit *SU);
     void ScheduleNodeTopDown(SUnit *SU, unsigned CurCycle);
     void ListScheduleTopDown();
-    void StartBlockForKills(MachineBasicBlock *BB);
-
-    // ToggleKillFlag - Toggle a register operand kill flag. Other
-    // adjustments may be made to the instruction if necessary. Return
-    // true if the operand has been deleted, false if not.
-    bool ToggleKillFlag(MachineInstr *MI, MachineOperand &MO);
   };
 }
 
@@ -181,8 +169,7 @@ SchedulePostRATDList::SchedulePostRATDList(
   MachineFunction &MF, MachineLoopInfo &MLI, MachineDominatorTree &MDT,
   AliasAnalysis *AA, TargetSubtarget::AntiDepBreakMode AntiDepMode,
   SmallVectorImpl<TargetRegisterClass*> &CriticalPathRCs)
-  : ScheduleDAGInstrs(MF, MLI, MDT), Topo(SUnits), AA(AA),
-    KillIndices(TRI->getNumRegs())
+  : SchedulePostRABase(MF, MLI, MDT), Topo(SUnits), AA(AA)
 {
   const TargetMachine &TM = MF.getTarget();
   const InstrItineraryData *InstrItins = TM.getInstrItineraryData();
@@ -348,177 +335,6 @@ void SchedulePostRATDList::FinishBlock() {
 
   // Call the superclass.
   ScheduleDAGInstrs::FinishBlock();
-}
-
-/// StartBlockForKills - Initialize register live-range state for updating kills
-///
-void SchedulePostRATDList::StartBlockForKills(MachineBasicBlock *BB) {
-  // Initialize the indices to indicate that no registers are live.
-  for (unsigned i = 0; i < TRI->getNumRegs(); ++i)
-    KillIndices[i] = ~0u;
-
-  // Determine the live-out physregs for this block.
-  if (!BB->empty() && BB->back().getDesc().isReturn()) {
-    // In a return block, examine the function live-out regs.
-    for (MachineRegisterInfo::liveout_iterator I = MRI.liveout_begin(),
-           E = MRI.liveout_end(); I != E; ++I) {
-      unsigned Reg = *I;
-      KillIndices[Reg] = BB->size();
-      // Repeat, for all subregs.
-      for (const unsigned *Subreg = TRI->getSubRegisters(Reg);
-           *Subreg; ++Subreg) {
-        KillIndices[*Subreg] = BB->size();
-      }
-    }
-  }
-  else {
-    // In a non-return block, examine the live-in regs of all successors.
-    for (MachineBasicBlock::succ_iterator SI = BB->succ_begin(),
-           SE = BB->succ_end(); SI != SE; ++SI) {
-      for (MachineBasicBlock::livein_iterator I = (*SI)->livein_begin(),
-             E = (*SI)->livein_end(); I != E; ++I) {
-        unsigned Reg = *I;
-        KillIndices[Reg] = BB->size();
-        // Repeat, for all subregs.
-        for (const unsigned *Subreg = TRI->getSubRegisters(Reg);
-             *Subreg; ++Subreg) {
-          KillIndices[*Subreg] = BB->size();
-        }
-      }
-    }
-  }
-}
-
-bool SchedulePostRATDList::ToggleKillFlag(MachineInstr *MI,
-                                          MachineOperand &MO) {
-  // Setting kill flag...
-  if (!MO.isKill()) {
-    MO.setIsKill(true);
-    return false;
-  }
-
-  // If MO itself is live, clear the kill flag...
-  if (KillIndices[MO.getReg()] != ~0u) {
-    MO.setIsKill(false);
-    return false;
-  }
-
-  // If any subreg of MO is live, then create an imp-def for that
-  // subreg and keep MO marked as killed.
-  MO.setIsKill(false);
-  bool AllDead = true;
-  const unsigned SuperReg = MO.getReg();
-  for (const unsigned *Subreg = TRI->getSubRegisters(SuperReg);
-       *Subreg; ++Subreg) {
-    if (KillIndices[*Subreg] != ~0u) {
-      MI->addOperand(MachineOperand::CreateReg(*Subreg,
-                                               true  /*IsDef*/,
-                                               true  /*IsImp*/,
-                                               false /*IsKill*/,
-                                               false /*IsDead*/));
-      AllDead = false;
-    }
-  }
-
-  if(AllDead)
-    MO.setIsKill(true);
-  return false;
-}
-
-/// FixupKills - Fix the register kill flags, they may have been made
-/// incorrect by instruction reordering.
-///
-void SchedulePostRATDList::FixupKills(MachineBasicBlock *MBB) {
-  DEBUG(dbgs() << "Fixup kills for BB#" << MBB->getNumber() << '\n');
-
-  std::set<unsigned> killedRegs;
-  BitVector ReservedRegs = TRI->getReservedRegs(MF);
-
-  StartBlockForKills(MBB);
-
-  // Examine block from end to start...
-  unsigned Count = MBB->size();
-  for (MachineBasicBlock::iterator I = MBB->end(), E = MBB->begin();
-       I != E; --Count) {
-    MachineInstr *MI = --I;
-    if (MI->isDebugValue())
-      continue;
-
-    // Update liveness.  Registers that are defed but not used in this
-    // instruction are now dead. Mark register and all subregs as they
-    // are completely defined.
-    for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-      MachineOperand &MO = MI->getOperand(i);
-      if (!MO.isReg()) continue;
-      unsigned Reg = MO.getReg();
-      if (Reg == 0) continue;
-      if (!MO.isDef()) continue;
-      // Ignore two-addr defs.
-      if (MI->isRegTiedToUseOperand(i)) continue;
-
-      KillIndices[Reg] = ~0u;
-
-      // Repeat for all subregs.
-      for (const unsigned *Subreg = TRI->getSubRegisters(Reg);
-           *Subreg; ++Subreg) {
-        KillIndices[*Subreg] = ~0u;
-      }
-    }
-
-    // Examine all used registers and set/clear kill flag. When a
-    // register is used multiple times we only set the kill flag on
-    // the first use.
-    killedRegs.clear();
-    for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-      MachineOperand &MO = MI->getOperand(i);
-      if (!MO.isReg() || !MO.isUse()) continue;
-      unsigned Reg = MO.getReg();
-      if ((Reg == 0) || ReservedRegs.test(Reg)) continue;
-
-      bool kill = false;
-      if (killedRegs.find(Reg) == killedRegs.end()) {
-        kill = true;
-        // A register is not killed if any subregs are live...
-        for (const unsigned *Subreg = TRI->getSubRegisters(Reg);
-             *Subreg; ++Subreg) {
-          if (KillIndices[*Subreg] != ~0u) {
-            kill = false;
-            break;
-          }
-        }
-
-        // If subreg is not live, then register is killed if it became
-        // live in this instruction
-        if (kill)
-          kill = (KillIndices[Reg] == ~0u);
-      }
-
-      if (MO.isKill() != kill) {
-        DEBUG(dbgs() << "Fixing " << MO << " in ");
-        // Warning: ToggleKillFlag may invalidate MO.
-        ToggleKillFlag(MI, MO);
-        DEBUG(MI->dump());
-      }
-
-      killedRegs.insert(Reg);
-    }
-
-    // Mark any used register (that is not using undef) and subregs as
-    // now live...
-    for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-      MachineOperand &MO = MI->getOperand(i);
-      if (!MO.isReg() || !MO.isUse() || MO.isUndef()) continue;
-      unsigned Reg = MO.getReg();
-      if ((Reg == 0) || ReservedRegs.test(Reg)) continue;
-
-      KillIndices[Reg] = Count;
-
-      for (const unsigned *Subreg = TRI->getSubRegisters(Reg);
-           *Subreg; ++Subreg) {
-        KillIndices[*Subreg] = Count;
-      }
-    }
-  }
 }
 
 //===----------------------------------------------------------------------===//

@@ -105,7 +105,6 @@ char TMS320C64XScheduler::ID = 0;
     virtual void BuildSchedGraph(AliasAnalysis *AA);
     virtual void Schedule();
     virtual unsigned getCycles() const { return NumCycles; }
-    virtual void FixupKills(MachineBasicBlock *MBB) {};
     virtual void Observe(MachineInstr *MI, unsigned Count) {};
     virtual void StartBlock(MachineBasicBlock *BB);
   };
