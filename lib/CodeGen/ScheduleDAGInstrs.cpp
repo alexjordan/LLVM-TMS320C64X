@@ -484,8 +484,13 @@ void ScheduleDAGInstrs::BuildSchedGraph(AliasAnalysis *AA) {
         std::map<const Value *, SUnit *>::iterator IE = 
           ((MayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
         if (I != IE) {
-          I->second->addPred(SDep(SU, SDep::Order, /*Latency=*/0, /*Reg=*/0,
-                                  /*isNormalMemory=*/true));
+          // XXX
+          // XXX aliasing stores must not be issued in the same cycle (hack
+          // XXX for TMS320C64X).
+          // XXX
+          I->second->addPred(SDep(SU, SDep::Order,
+                                  /*Latency=*/TrueMemOrderLatency,
+                                  /*Reg=*/0, /*isNormalMemory=*/true));
           I->second = SU;
         } else {
           if (MayAlias)
