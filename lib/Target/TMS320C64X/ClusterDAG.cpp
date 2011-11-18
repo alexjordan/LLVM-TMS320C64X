@@ -814,13 +814,35 @@ bool UAS::needCopy(SUnit *SU, unsigned side, SmallVector<unsigned,2> &regs,
 
 unsigned UAS::insertCopy(unsigned reg, unsigned side) {
   unsigned vnew = MRI.createVirtualRegister(sideToRC(side));
+  MachineInstr *DefMI = MRI.getVRegDef(reg);
+  MachineBasicBlock *DefMBB = DefMI->getParent();
   DebugLoc dl;
-  MachineInstr *MI =
-    BuildMI(MF, dl, TII->get(TargetOpcode::COPY), vnew).addReg(reg);
+  MachineInstr *MI;
+  // place the copy
+  bool defInDifferentBlock = DefMI->getParent() != BB;
+  if (defInDifferentBlock) {
+    // different block
+    MachineBasicBlock::iterator InsertIt = DefMI;
+    if (DefMI->isPHI())
+      InsertIt = DefMBB->getFirstNonPHI(); // don't stick it between PHIs
+    else
+      ++InsertIt; // insert after def
+
+    MI = BuildMI(*DefMI->getParent(), InsertIt, dl,
+                 TII->get(TargetOpcode::COPY), vnew).addReg(reg);
+  } else {
+    // same block, just create the MI
+    MI = BuildMI(MF, dl, TII->get(TargetOpcode::COPY), vnew).addReg(reg);
+  }
   SUnit *SU = new SUnit(MI, SUnits.size() + CopySUs.size());
   SU->OrigNode = SU;
-  CopySUs.push_back(SU);
-  Sequence.push_back(SU);
+
+  // insert copy into scheduling sequence of the current block
+  if (!defInDifferentBlock) {
+    CopySUs.push_back(SU);
+    Sequence.push_back(SU);
+  }
+
   CAState->addXccSplit(reg, vnew, side, MI);
   DEBUG(dbgs() << "*** Scheduling [XCC]: ");
   DEBUG(SU->dump(this));
@@ -931,6 +953,7 @@ ClusterPriority UAS::getClusterPriority(SUnit *SU) {
 
   switch (PF) {
   case None:
+    //return ClusterPriority(TMS320C64XInstrInfo::getSide(MI));
     return ClusterPriority(0, 1);
   case Random:
     return prioRandom(MI);
