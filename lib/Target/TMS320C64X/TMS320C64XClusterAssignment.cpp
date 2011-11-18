@@ -367,7 +367,7 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
     Scheduler->Run(MBB, MBB->getFirstNonPHI(), MBB->end(), MBB->size());
   }
 
-  Fn.verify(this, "After Cluster Assignment");
+  Fn.verifySSA(this, "After Cluster Assignment");
   Fn.dump();
 
   delete Scheduler;

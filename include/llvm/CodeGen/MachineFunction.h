@@ -273,6 +273,10 @@ public:
   /// verifier, useful for debugger use.
   void verify(Pass *p = NULL, const char *Banner = NULL) const;
 
+  /// verifySSA - In addition to verify, also checks SSA consistency. Requires a
+  /// pass that has dominator tree analysis.
+  void verifySSA(Pass *p, const char *Banner = NULL) const;
+
   // Provide accessors for the MachineBasicBlock list...
   typedef BasicBlockListType::iterator iterator;
   typedef BasicBlockListType::const_iterator const_iterator;

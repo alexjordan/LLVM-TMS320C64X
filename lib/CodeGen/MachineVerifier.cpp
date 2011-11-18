@@ -27,6 +27,7 @@
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/LiveVariables.h"
 #include "llvm/CodeGen/LiveStackAnalysis.h"
+#include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
@@ -46,9 +47,10 @@ using namespace llvm;
 namespace {
   struct MachineVerifier {
 
-    MachineVerifier(Pass *pass, const char *b) :
+    MachineVerifier(Pass *pass, const char *b, bool verifySSA = false) :
       PASS(pass),
       Banner(b),
+      VerifySSA(verifySSA),
       OutFileName(getenv("LLVM_VERIFY_MACHINEINSTRS"))
       {}
 
@@ -56,12 +58,14 @@ namespace {
 
     Pass *const PASS;
     const char *Banner;
+    bool VerifySSA;
     const char *const OutFileName;
     raw_ostream *OS;
     const MachineFunction *MF;
     const TargetMachine *TM;
     const TargetRegisterInfo *TRI;
     const MachineRegisterInfo *MRI;
+    MachineDominatorTree *DT;
 
     unsigned foundErrors;
 
@@ -233,6 +237,11 @@ void MachineFunction::verify(Pass *p, const char *Banner) const {
     .runOnMachineFunction(const_cast<MachineFunction&>(*this));
 }
 
+void MachineFunction::verifySSA(Pass *p, const char *Banner) const {
+  MachineVerifier(p, Banner, true)
+    .runOnMachineFunction(const_cast<MachineFunction&>(*this));
+}
+
 bool MachineVerifier::runOnMachineFunction(MachineFunction &MF) {
   raw_ostream *OutFile = 0;
   if (OutFileName) {
@@ -267,6 +276,11 @@ bool MachineVerifier::runOnMachineFunction(MachineFunction &MF) {
       LiveVars = PASS->getAnalysisIfAvailable<LiveVariables>();
     LiveStks = PASS->getAnalysisIfAvailable<LiveStacks>();
     Indexes = PASS->getAnalysisIfAvailable<SlotIndexes>();
+  }
+
+  if (VerifySSA) {
+    assert(PASS);
+    DT = &PASS->getAnalysis<MachineDominatorTree>();
   }
 
   visitMachineFunctionBefore();
@@ -748,6 +762,20 @@ MachineVerifier::visitMachineOperand(const MachineOperand *MO, unsigned MONum) {
             *OS << "Expected a " << DRC->getName() << " register, but got a "
                 << RC->getName() << " register\n";
           }
+        }
+      }
+    }
+
+    if (VerifySSA) {
+      if (!MI->isPHI() && MO->isReg() && MO->isUse() &&
+          TargetRegisterInfo::isVirtualRegister(Reg)) {
+        MachineInstr *DefMI = MRI->getVRegDef(Reg);
+        if (!DT->dominates(const_cast<MachineInstr*>(DefMI),
+                           const_cast<MachineInstr*>(MI))) {
+          report("Register def does not dominate use (not in SSA)", MO, MONum);
+          *OS << PrintReg(Reg) << " is defined in block " <<
+            DefMI->getParent()->getName() <<
+            " (BB#" << DefMI->getParent()->getNumber() << ")\n";
         }
       }
     }
