@@ -124,6 +124,8 @@ void
 TMS320C64XRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MBBI,
                                             int SPAdj, RegScavenger *r) const
 {
+  using namespace TMS320C64X;
+
   unsigned i, frame_index, reg, access_alignment;
   int offs;
 
@@ -200,18 +202,29 @@ TMS320C64XRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MBBI,
     reg = r->scavengeRegister(c, MBBI, 0);
   }
 
-  // XXX - this will explode when the stack offset is > 2^15, at which
-  // point we need to start pairing mvkl/mvkh. Don't worry about that for
-  // now, because the assembler will start complaining when that occurs
+  unsigned side_a = (c == TMS320C64X::ARegsRegisterClass);
 
-  unsigned mvk_op = (c == TMS320C64X::ARegsRegisterClass) ?
-    TMS320C64X::mvk_1 : TMS320C64X::mvk_2;
-
-  TMS320C64XInstrInfo::addFormOp(
-    TMS320C64XInstrInfo::addDefaultPred(
-      BuildMI(MBB, MBBI, dl, TII.get(mvk_op))
-        .addReg(reg, RegState::Define).addImm(offs)),
-          TMS320C64XII::unit_s, false);
+  if (TMS320C64XInstrInfo::check_sconst_fits(offs, 16)) {
+    // fits into one mvk
+    TMS320C64XInstrInfo::addFormOp(
+      TMS320C64XInstrInfo::addDefaultPred(
+        BuildMI(MBB, MBBI, dl, TII.get(side_a ? mvk_1 : mvk_2))
+          .addReg(reg, RegState::Define).addImm(offs)),
+            TMS320C64XII::unit_s, false);
+  } else {
+    // needs a mvkh/mvkl pair
+    TMS320C64XInstrInfo::addFormOp(
+      TMS320C64XInstrInfo::addDefaultPred(
+        BuildMI(MBB, MBBI, dl, TII.get(side_a ? mvkl_1 : mvkl_2))
+          .addReg(reg, RegState::Define).addImm(offs)),
+            TMS320C64XII::unit_s, false);
+    TMS320C64XInstrInfo::addFormOp(
+      TMS320C64XInstrInfo::addDefaultPred(
+        BuildMI(MBB, MBBI, dl, TII.get(side_a ? mvkh_1 : mvkh_2))
+          .addReg(reg, RegState::Define).addImm(offs)
+            .addReg(reg)),
+              TMS320C64XII::unit_s, false);
+  }
 
   MI.getOperand(i).ChangeToRegister(reg, false, false, true);
 }

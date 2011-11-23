@@ -78,9 +78,6 @@ void TMS320C64XFrameLowering::emitPrologue(MachineFunction &MF) const {
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineBasicBlock::iterator MBBI = MBB.begin();
 
-//  DebugLoc dl = (MBBI != MBB.end() ? MBBI->getDebugLoc()
-//              : DebugLoc::getUnknownLoc());
-
   DebugLoc dl = (MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc());
 
   // Mark return address as being a live in - don't mark it as such for
@@ -98,9 +95,8 @@ void TMS320C64XFrameLowering::emitPrologue(MachineFunction &MF) const {
 
   const TMS320C64XInstrInfo &TII = *TM.getInstrInfo();
 
-  // Emit setup instructions - unfortunately because they have to be
-  // done in parallel now, this can't currently be modeled through llvm,
-  // so instead we hack this in at the assembly printing stage.
+  // Different to epilogue, we always use the prolog pseudo function, which
+  // will emit a 2- or 3-cycle prologue.
   TMS320C64XInstrInfo::addDefaultPred(BuildMI(MBB, MBBI, dl,
     TII.get(TMS320C64X::prolog)).addImm(frame_size));
 }

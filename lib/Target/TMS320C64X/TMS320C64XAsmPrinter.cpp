@@ -215,13 +215,31 @@ void TMS320C64XAsmPrinter::emit_prolog(const MachineInstr *MI) {
   SmallString<256> prologueString;
   raw_svector_ostream OS(prologueString);
 
+  // If the stack offset is larger than 16-bit (signed), the prologue needs to
+  // include an mvkl/mvkh pair.
+  bool smallStack =
+    TMS320C64XInstrInfo::check_sconst_fits(MI->getOperand(0).getImm(), 16);
+
   OS << "\t; begin prolog\n";
-  OS << "\t\tmvk\t\t";
 
-  printOperand(MI, 0, OS);
+  if (smallStack) {
+    OS << "\t\tmvk\t\t";
+    printOperand(MI, 0, OS);
+    OS << ",\tA0\n";
+  } else {
+    OS << "\t\tmvkl\t\t";
+    printOperand(MI, 0, OS);
+    OS << ",\tA0\n";
+  }
 
-  OS << ",\tA0\n";
   OS << "\t||\tmv\t\tB15,\tA1\n";
+
+  if (!smallStack) {
+    OS << "\t\tmvkh\t\t";
+    printOperand(MI, 0, OS);
+    OS << ",\tA0\n";
+  }
+
   OS << "\t\tstw\t\tA15,\t*B15\n";
   OS << "\t||\tstw\t\tB3,\t*-A1(4)\n";
   OS << "\t||\tmv\t\tB15,\tA15\n";
