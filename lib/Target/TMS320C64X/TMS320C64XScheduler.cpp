@@ -17,8 +17,9 @@
 #include "TMS320C64X.h"
 #include "TMS320C64XMachineFunctionInfo.h"
 #include "TMS320C64XInstrInfo.h"
+#include "Scheduling.h"
 #include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/CodeGen/SchedulePostRABase.h"
+#include "llvm/CodeGen/ScheduleInstrsCommon.h"
 #include "llvm/PassManager.h"
 #include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -74,10 +75,16 @@ class TMS320C64XScheduler : public MachineFunctionPass {
 };
 
 //-----------------------------------------------------------------------------
+#if 0
+typedef TMS320C64X::SchedulerBase TheBase;
+#else
+typedef ScheduleDAGInstrs TheBase;
+#endif
 
 char TMS320C64XScheduler::ID = 0;
 
-  class CustomListScheduler : public SchedulePostRABase {
+  class CustomListScheduler : public TheBase,
+                              public ScheduleInstrsCommon {
 
     /// HazardRec - The hazard recognizer to use.
     ScheduleHazardRecognizer *HazardRec;
@@ -123,7 +130,8 @@ CustomListScheduler::CustomListScheduler(MachineFunction &MF,
                                   const MachineDominatorTree &MDT,
                                   ScheduleHazardRecognizer *HR,
                                   AliasAnalysis *AA)
-  : SchedulePostRABase(MF, MLI, MDT)
+  : TheBase(MF, MLI, MDT)
+  , ScheduleInstrsCommon(MF)
   , HazardRec(HR)
   , NumCycles(0)
 {}
@@ -205,7 +213,7 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
 
   unsigned NumCycles = 0;
 
-  SchedulePostRABase *Scheduler =
+  CustomListScheduler *Scheduler =
     new CustomListScheduler(Fn, MLI, MDT, HR, AA);
 
   // Loop over all of the basic blocks
@@ -277,7 +285,7 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
 ///
 void CustomListScheduler::StartBlock(MachineBasicBlock *BB) {
   // Call the superclass.
-  ScheduleDAGInstrs::StartBlock(BB);
+  TheBase::StartBlock(BB);
 
   // Reset the hazard recognizer and anti-dep breaker.
   HazardRec->Reset();
@@ -521,7 +529,7 @@ void CustomListScheduler::ListScheduleBottomUp() {
 
 void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
  // build the graph as always
-  SchedulePostRABase::BuildSchedGraph(AA);
+  TheBase::BuildSchedGraph(AA);
 
   // Enforce strict order on calls and branches. This also connects our 'branch
   // happens' instruction (TERM) to the actual branch instr.

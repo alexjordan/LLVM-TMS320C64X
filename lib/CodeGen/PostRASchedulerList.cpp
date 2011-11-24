@@ -22,7 +22,7 @@
 #include "AntiDepBreaker.h"
 #include "AggressiveAntiDepBreaker.h"
 #include "CriticalAntiDepBreaker.h"
-#include "llvm/CodeGen/SchedulePostRABase.h"
+#include "llvm/CodeGen/ScheduleInstrsCommon.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
@@ -105,7 +105,7 @@ namespace {
   };
   char PostRAScheduler::ID = 0;
 
-  class SchedulePostRATDList : public SchedulePostRABase {
+  class SchedulePostRATDList : public ScheduleDAGInstrs, public ScheduleInstrsCommon {
     /// AvailableQueue - The priority queue to use for the available SUnits.
     ///
     LatencyPriorityQueue AvailableQueue;
@@ -169,7 +169,8 @@ SchedulePostRATDList::SchedulePostRATDList(
   MachineFunction &MF, MachineLoopInfo &MLI, MachineDominatorTree &MDT,
   AliasAnalysis *AA, TargetSubtarget::AntiDepBreakMode AntiDepMode,
   SmallVectorImpl<TargetRegisterClass*> &CriticalPathRCs)
-  : SchedulePostRABase(MF, MLI, MDT), Topo(SUnits), AA(AA)
+  : ScheduleDAGInstrs(MF, MLI, MDT), ScheduleInstrsCommon(MF),
+    Topo(SUnits), AA(AA)
 {
   const TargetMachine &TM = MF.getTarget();
   const InstrItineraryData *InstrItins = TM.getInstrItineraryData();

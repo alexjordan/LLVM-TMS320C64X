@@ -1,4 +1,4 @@
-//===----- SchedulePostRABase.cpp - common scheduler code -----------------===//
+//===----- ScheduleInstrsCommon.cpp ------ scheduler helper code ----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -9,7 +9,7 @@
 
 #define DEBUG_TYPE "post-RA-sched"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/SchedulePostRABase.h"
+#include "llvm/CodeGen/ScheduleInstrsCommon.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
@@ -18,7 +18,7 @@ using namespace llvm;
 /// FixupKills - Fix the register kill flags, they may have been made
 /// incorrect by instruction reordering.
 ///
-void SchedulePostRABase::FixupKills(MachineBasicBlock *MBB) {
+void ScheduleInstrsCommon::FixupKills(MachineBasicBlock *MBB) {
   DEBUG(dbgs() << "Fixup kills for BB#" << MBB->getNumber() << '\n');
 
   std::set<unsigned> killedRegs;
@@ -111,7 +111,7 @@ void SchedulePostRABase::FixupKills(MachineBasicBlock *MBB) {
   }
 }
 
-bool SchedulePostRABase::ToggleKillFlag(MachineInstr *MI,
+bool ScheduleInstrsCommon::ToggleKillFlag(MachineInstr *MI,
                                         MachineOperand &MO) {
   // Setting kill flag...
   if (!MO.isKill()) {
@@ -149,7 +149,7 @@ bool SchedulePostRABase::ToggleKillFlag(MachineInstr *MI,
 
 /// StartBlockForKills - Initialize register live-range state for updating kills
 ///
-void SchedulePostRABase::StartBlockForKills(MachineBasicBlock *BB) {
+void ScheduleInstrsCommon::StartBlockForKills(MachineBasicBlock *BB) {
   // Initialize the indices to indicate that no registers are live.
   for (unsigned i = 0; i < TRI->getNumRegs(); ++i)
     KillIndices[i] = ~0u;

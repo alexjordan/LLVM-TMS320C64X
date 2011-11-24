@@ -1,4 +1,4 @@
-//===---- llvm/CodeGen/PostRASchedulerBase.h - Common Base Class-*- C++ -*-===//
+//===---- llvm/CodeGen/ScheduleInstrsCommon.h -------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,14 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file declares an abstract base for post RA schedulers
+// This file declares a helper class for machine instrutions schedulers.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CODEGEN_SCHEDULEPOSTRA_H
-#define LLVM_CODEGEN_SCHEDULEPOSTRA_H
+#ifndef LLVM_CODEGEN_SCHEDULE_INSTRS_COMMON_H
+#define LLVM_CODEGEN_SCHEDULE_INSTRS_COMMON_H
 
-#include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 
 namespace llvm {
@@ -22,18 +21,23 @@ namespace llvm {
   class MachineModuleInfo;
   class MachineRegisterInfo;
   class MachineInstr;
+  class TargetRegisterInfo;
 
-  class SchedulePostRABase : public ScheduleDAGInstrs {
+  class ScheduleInstrsCommon {
+
+    const TargetRegisterInfo *TRI;
+    MachineRegisterInfo &MRI;
+    MachineFunction &MF;
 
     /// KillIndices - The index of the most recent kill (proceding bottom-up),
     /// or ~0u if the register is not live.
     std::vector<unsigned> KillIndices;
 
   public:
-    SchedulePostRABase(MachineFunction &MF,
-                         const MachineLoopInfo &MLI,
-                         const MachineDominatorTree &MDT)
-      : ScheduleDAGInstrs(MF, MLI, MDT)
+    ScheduleInstrsCommon(MachineFunction &mf)
+      : TRI(mf.getTarget().getRegisterInfo())
+      , MRI(mf.getRegInfo())
+      , MF(mf)
       , KillIndices(TRI->getNumRegs())
     {}
 
@@ -43,9 +47,6 @@ namespace llvm {
     /// invalid due to scheduling
     ///
     virtual void FixupKills(MachineBasicBlock *MBB);
-
-    // return the number of cycles for last scheduled region
-    virtual unsigned getCycles() const = 0;
 
   protected:
     // ToggleKillFlag - Toggle a register operand kill flag. Other

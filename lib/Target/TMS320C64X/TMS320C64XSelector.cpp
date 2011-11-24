@@ -27,7 +27,6 @@
 #include "TMS320C64X.h"
 #include "TMS320C64XTargetMachine.h"
 #include "TMS320C64XRegisterInfo.h"
-#include "ClusterAssignment.h"
 
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Intrinsics.h"

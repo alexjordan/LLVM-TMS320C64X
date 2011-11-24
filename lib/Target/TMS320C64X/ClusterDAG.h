@@ -16,9 +16,9 @@
 #define LLVM_TARGET_TMS320C64X_CLUSTERDAG_H
 
 #include "TMS320C64XClusterAssignment.h"
+#include "Scheduling.h"
 #include "TMS320C64XHazardRecognizer.h"
 #include "llvm/CodeGen/LatencyPriorityQueue.h"
-#include "llvm/CodeGen/ScheduleDAGInstrs.h"
 
 namespace llvm {
   class SDNode;
@@ -30,7 +30,7 @@ namespace TMS320C64X {
   std::pair<int,int> countOperandSides(const MachineInstr *MI,
                                        MachineRegisterInfo &MRI);
 
-  class ClusterDAG : public ScheduleDAGInstrs {
+  class ClusterDAG : public TMS320C64X::SchedulerBase {
   protected:
     ResourceAssignment *FUSched;
     const TargetRegisterInfo *TRI;
@@ -42,7 +42,7 @@ namespace TMS320C64X {
                const MachineLoopInfo &MLI,
                const MachineDominatorTree &MDT,
                AssignmentState *state)
-      : ScheduleDAGInstrs(MF, MLI, MDT)
+      : SchedulerBase(MF, MLI, MDT)
       , FUSched(NULL)
       , TRI(MF.getTarget().getRegisterInfo())
       , CAState(state)
@@ -54,7 +54,6 @@ namespace TMS320C64X {
       FUSched = r;
     }
 
-    virtual void BuildSchedGraph(AliasAnalysis *AA);
   };
 
   class ClusterPriority {
