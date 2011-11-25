@@ -381,6 +381,11 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
     // the number of its successors/predecessors, etc
     bool isProfitableToDuplicate(BBInfo &MBB) const;
 
+    // returns true, if the specified blocks represent a backedge to the pa-
+    // rent loop. I.e the destination block is a header of a loop containing
+    // the source block. We avoid converting such constellations
+    bool isParentLoopBackedge(BBInfo &src, BBInfo &dst) const;
+
     // another helper method that tells whether the specified block is mer-
     // geable in general. I.e. whether its CFG structure (predecessors/suc-
     // cessors) is suitable, whether it eventually can be duplicated, etc.
@@ -562,6 +567,12 @@ TMS320C64XIfConversion::getCommonSuccessor(MachineBasicBlock &FBB,
 }
 
 //------------------------------------------------------------------------------
+// requiresPredication:
+//
+// Returns whenter a given machine instruction can be skipped during predi-
+// cation process. This is true for some llvm-pseudo artifacts such as kill
+// or implicit defs or target pseudos. Note, this actually also includes any
+// IR copies, however we do handle them separately
 
 bool TMS320C64XIfConversion::requiresPredication(const MachineInstr &MI) const
 {
@@ -572,6 +583,28 @@ bool TMS320C64XIfConversion::requiresPredication(const MachineInstr &MI) const
       return false;
     default: return true;
   }
+}
+
+//------------------------------------------------------------------------------
+// isParentLoopBackedge:
+//
+// Returns true, if the specified blocks represent a backedge to the parent
+// loop. I.e the destination block is a header of a loop containing the source
+// block. This present difficulties and is rarely profitable, thus we avoid
+// converting such structures
+
+bool
+TMS320C64XIfConversion::isParentLoopBackedge(BBInfo &src, BBInfo &dst) const {
+  assert(MLI && "Can't check for backedges without loop-info!");
+  assert(src.MBB && dst.MBB && "Invalid blocks to check for a backedge!");
+
+  if (!MLI->isLoopHeader(dst.MBB)) return false;
+
+  const int dstLoopDepth = MLI->getLoopDepth(dst.MBB);
+  const int srcLoopDepth = MLI->getLoopDepth(src.MBB);
+
+  // strong enough even for nat. loops ?
+  return dstLoopDepth <= srcLoopDepth;
 }
 
 //------------------------------------------------------------------------------
@@ -797,7 +830,7 @@ void TMS320C64XIfConversion::extractIfPattern(BBInfo &head) {
   assert(head.branchTBB && head.branchFBB && "Bad branch-targets!");
   assert(head.branchTBB != head.branchFBB && "Strange double-edge!");
 
-  // there must not be cycles between brnach targets
+  // there must not be cycles between branch targets
   if (head.branchTBB->isSuccessor(head.branchFBB)
   && (head.branchFBB->isSuccessor(head.branchTBB))) return;
 
@@ -1810,13 +1843,9 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
     MPI = getAnalysisIfAvailable<MachineProfileAnalysis>();
     if (!MPI || !MPI->getExecutionCount(&MF)) return false;
   }
-  else if (EstimationType == Static) {
-    // for a static information we inspect the structure of a function and
-    // require at least the loop informatio to be available. Againe, if none
-    // is available, do not try anthing, just return without success
-    MLI = getAnalysisIfAvailable<MachineLoopInfo>();
-    if (!MLI) return false;
-  }
+
+  MLI = getAnalysisIfAvailable<MachineLoopInfo>();
+  if (!MLI) return false;
 
   DEBUG(dbgs() << "Run 'TMS320C64XIfConversion' pass for '"
                << MF.getFunction()->getNameStr() << "'\n");
