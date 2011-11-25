@@ -13,56 +13,41 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "phi-opt"
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/OptimizePHIs.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Function.h"
-#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+
 using namespace llvm;
 
 STATISTIC(NumPHICycles, "Number of PHI cycles replaced");
 STATISTIC(NumDeadPHICycles, "Number of dead PHI cycles");
 
-namespace {
-  class OptimizePHIs : public MachineFunctionPass {
-    MachineRegisterInfo *MRI;
-    const TargetInstrInfo *TII;
-
-  public:
-    static char ID; // Pass identification
-    OptimizePHIs() : MachineFunctionPass(ID) {
-      initializeOptimizePHIsPass(*PassRegistry::getPassRegistry());
-    }
-
-    virtual bool runOnMachineFunction(MachineFunction &MF);
-
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.setPreservesCFG();
-      MachineFunctionPass::getAnalysisUsage(AU);
-    }
-
-  private:
-    typedef SmallPtrSet<MachineInstr*, 16> InstrSet;
-    typedef SmallPtrSetIterator<MachineInstr*> InstrSetIterator;
-
-    bool IsSingleValuePHICycle(MachineInstr *MI, unsigned &SingleValReg,
-                               InstrSet &PHIsInCycle);
-    bool IsDeadPHICycle(MachineInstr *MI, InstrSet &PHIsInCycle);
-    bool OptimizeBB(MachineBasicBlock &MBB);
-  };
-}
-
 char OptimizePHIs::ID = 0;
+
 INITIALIZE_PASS(OptimizePHIs, "opt-phis",
                 "Optimize machine instruction PHIs", false, false)
 
 FunctionPass *llvm::createOptimizePHIsPass() { return new OptimizePHIs(); }
 
+//----------------------------------------------------------------------------
+
+OptimizePHIs::OptimizePHIs() : MachineFunctionPass(ID) {
+  initializeOptimizePHIsPass(*PassRegistry::getPassRegistry());
+}
+
+//----------------------------------------------------------------------------
+
+void OptimizePHIs::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.setPreservesCFG();
+  MachineFunctionPass::getAnalysisUsage(AU);
+}
+
+//----------------------------------------------------------------------------
+
 bool OptimizePHIs::runOnMachineFunction(MachineFunction &Fn) {
-  MRI = &Fn.getRegInfo();
   TII = Fn.getTarget().getInstrInfo();
 
   // Find dead PHI cycles and PHI cycles that can be replaced by a single
@@ -76,6 +61,8 @@ bool OptimizePHIs::runOnMachineFunction(MachineFunction &Fn) {
   return Changed;
 }
 
+//----------------------------------------------------------------------------
+
 /// IsSingleValuePHICycle - Check if MI is a PHI where all the source operands
 /// are copies of SingleValReg, possibly via copies through other PHIs.  If
 /// SingleValReg is zero on entry, it is set to the register with the single
@@ -83,7 +70,12 @@ bool OptimizePHIs::runOnMachineFunction(MachineFunction &Fn) {
 /// have been scanned.
 bool OptimizePHIs::IsSingleValuePHICycle(MachineInstr *MI,
                                          unsigned &SingleValReg,
-                                         InstrSet &PHIsInCycle) {
+                                         InstrSet &PHIsInCycle)
+{
+  MachineFunction *MF = MI->getParent()->getParent();
+  assert(MF && "Can not obtain machine function for the instruction!");
+  MachineRegisterInfo *MRI = &MF->getRegInfo();
+
   assert(MI->isPHI() && "IsSingleValuePHICycle expects a PHI instruction");
   unsigned DstReg = MI->getOperand(0).getReg();
 
@@ -127,6 +119,11 @@ bool OptimizePHIs::IsSingleValuePHICycle(MachineInstr *MI,
 /// IsDeadPHICycle - Check if the register defined by a PHI is only used by
 /// other PHIs in a cycle.
 bool OptimizePHIs::IsDeadPHICycle(MachineInstr *MI, InstrSet &PHIsInCycle) {
+
+  MachineFunction *MF = MI->getParent()->getParent();
+  assert(MF && "Can not obtain machine function for the instruction!");
+  MachineRegisterInfo *MRI = &MF->getRegInfo();
+
   assert(MI->isPHI() && "IsDeadPHICycle expects a PHI instruction");
   unsigned DstReg = MI->getOperand(0).getReg();
   assert(TargetRegisterInfo::isVirtualRegister(DstReg) &&
@@ -159,6 +156,11 @@ bool OptimizePHIs::OptimizeBB(MachineBasicBlock &MBB) {
     MachineInstr *MI = &*MII++;
     if (!MI->isPHI())
       break;
+
+    MachineFunction *MF = MBB.getParent();
+    assert(MF && "Can not obtain machine function for the block!");
+    MachineRegisterInfo *MRI = &MF->getRegInfo();
+
 
     // Check for single-value PHI cycles.
     unsigned SingleValReg = 0;
