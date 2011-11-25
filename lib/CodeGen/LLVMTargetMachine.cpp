@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineProfileAnalysis.h"
 #include "llvm/CodeGen/GCStrategy.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Target/TargetLowering.h"
@@ -33,11 +34,28 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/StandardPasses.h"
+#include "llvm/Analysis/PathProfileInfo.h"
+
 using namespace llvm;
 
 namespace llvm {
   bool EnableFastISel;
 }
+
+// NKim
+cl::opt<bool> EnableEdgeProfileLoader("load-edge-profile",
+  cl::Hidden, cl::desc("Load edge profile information from file"),
+  cl::init(false));
+
+// NKim
+cl::opt<bool> EnablePathProfileLoader("load-path-profile",
+    cl::Hidden, cl::desc("Load path profile information from file"),
+    cl::init(false));
+
+// NKim
+cl::opt<bool> BuildSuperblocks("build-superblocks",
+    cl::Hidden, cl::desc("Build superblocks from the path profile info"),
+    cl::init(false));
 
 cl::opt<bool> DisablePostRA("disable-post-ra", cl::Hidden,
     cl::desc("Disable Post Regalloc"));
@@ -311,16 +329,41 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   addPreISel(PM, OptLevel);
 
   if (PrintISelInput)
-    PM.add(createPrintFunctionPass("\n\n"
-                                   "*** Final LLVM Code input to ISel ***\n",
-                                   &dbgs()));
+    PM.add(createPrintFunctionPass(
+      "\n\n*** Final LLVM Code input to ISel ***\n", &dbgs()));
 
   // All passes which modify the LLVM IR are now complete; run the verifier
   // to ensure that the IR is valid.
-  if (!DisableVerify)
-    PM.add(createVerifierPass());
+  if (!DisableVerify) PM.add(createVerifierPass());
 
   // Standard Lower-Level Passes.
+  if (EnablePathProfileLoader || EnableEdgeProfileLoader)
+    PM.add(createBreakCriticalEdgesPass());
+
+  // NKim, create and run a path-profile-loader pass if required. The pass as
+  // such is passed to the pass-manager and additionally a reference is stored.
+  // this reference is then passed to the clients of this pass (f.e. superblock
+  // formation pass) to be able to use the profile-info. This is an ugly HACK.
+  //
+  // NOTE, if there is a much cleaner way to aquire this info (for example via
+  // the 'getAnalysis' template) let me know, for me it just didn't work (without
+  // reimplementing a great portion of the PathProfileInfo for the machine side),
+  // maybe due to the constraints between the IR and Machine passes
+  if (EnablePathProfileLoader) {
+    if (ModulePass *PathProfileLoader = createPathProfileLoaderPass()) {
+      MachineProfileAnalysis::PPI = (PathProfileInfo *)
+        PathProfileLoader->getAdjustedAnalysisPointer(&PathProfileInfo::ID);
+      PM.add(PathProfileLoader);
+    }
+  }
+
+  if (EnableEdgeProfileLoader) {
+    if (ModulePass *EdgeProfileLoader = createProfileLoaderPass()) {
+      MachineProfileAnalysis::EPI = (ProfileInfo *)
+        EdgeProfileLoader->getAdjustedAnalysisPointer(&ProfileInfo::ID);
+      PM.add(EdgeProfileLoader);
+    }
+  }
 
   // Install a MachineModuleInfo class, which is an immutable pass that holds
   // all the per-module stuff we're generating, including MCContext.
@@ -352,9 +395,17 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   if (OptLevel != CodeGenOpt::None)
     PM.add(createOptimizePHIsPass());
 
+  // NKim, try to build superblocks from the reconstructed profile data
+  if (BuildSuperblocks) PM.add(createSuperblockFormationPass());
+
   // If the target requests it, assign local variables to stack slots relative
   // to one another and simplify frame index references where possible.
   PM.add(createLocalStackSlotAllocationPass());
+
+  /// NKim - this is a hook the targets can use to insert their own passes,
+  /// which need to be run soon after the ISel, but before the regAlloc or
+  /// the pre-regalloc-scheduler
+  addPostISel(PM, OptLevel);
 
   if (OptLevel != CodeGenOpt::None) {
     // With optimization, dead code should already be eliminated. However

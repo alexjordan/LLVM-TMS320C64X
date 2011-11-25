@@ -103,7 +103,9 @@ class TMS320C64XTargetMachine : public VLIWTargetMachine {
     virtual bool addPreEmitPass(PassManagerBase &PM,
 				CodeGenOpt::Level OptLevel);
 
-    // Don't wish to overcomplicate things right now
+    // NKim, post-isel hook for early pre-ra target opts
+    virtual bool addPostISel(PassManagerBase &PM,
+                             CodeGenOpt::Level OptLevel);
 };
 
 } // namespace llvm

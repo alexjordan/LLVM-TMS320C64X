@@ -331,31 +331,6 @@ def : Pat<(i32 (Wrapper texternalsym:$dst)),
           (mvkh_1 texternalsym:$dst,
             (mvkl_1 texternalsym:$dst))>;
 
-
-// NKim, instruction for emitting a returning pad for an indirectly called rou-
-// tine. I model this as a pseudo-instruction, since this correspond to a label.
-// NOTE, we need to signal, that this pseudo-instruction may have side-effects
-// in order not to be eliminated by the optimizers !
-
-def call_return_label : pseudoinst<(outs), (ins LabelOperand:$label),
-                                   "$label:\t\t${:comment} return label", []>
-{
-  let isCodeGenOnly = 0;
-  let neverHasSideEffects = 0;
-  let isPredicable = 0;
-}
-
-// NKim, we now do this, since the TI does only support signed 16 bit constant-
-// quantities. To allow jumps/jsr beyond that range, we issue two instructions
-// for loading the upper and a lower part of the constant into a 32 bit TI-reg
-
-def : Pat<(call_label_operand_node texternalsym:$label),
-          (mvkh_label_1 texternalsym:$label,
-            (mvkl_label_1 texternalsym:$label))>;
-
-def : Pat<(call_return_label_node texternalsym:$label),
-          (call_return_label texternalsym:$label)>;
-
 // FIXME: Work out what on earth to do with lea
 def lea_fail : inst<(outs ARegs:$dst), (ins mem_operand:$ptr),
                 "add\t.L1\t$ptr,\t$dst",
@@ -424,37 +399,58 @@ def cmpltu_p_rr : pseudo_rr<"cmpltu", ".L1", unit_l, cmpltu_node, 0>;
 // the same register would achieve it with one cycle, but that involves touching
 // parallel stuff, which we're avoiding for now
 
-def mvselect : nodefaultpred_inst<(outs GPRegs:$dst), (ins GPRegs:$reg, GPRegs:$src1),
-		"mv\t\t$reg,\t$dst", [], 0, unit_s> {
-	let Constraints = "$src1 = $dst";
+def mvselect : nodefaultpred_inst<(outs GPRegs:$dst),
+                                  (ins GPRegs:$reg, GPRegs:$src1),
+                                  "mv\t\t$reg,\t$dst", [], 0, unit_s>
+{
+  let Constraints = "$src1 = $dst";
 }
 
-def : Pat<(tmsselect GPRegs:$false, GPRegs:$true, timm:$trueimm, predwrapper1:$truereg),
-	  (mvselect GPRegs:$true, GPRegs:$false, imm:$trueimm, predwrapper1:$truereg)>;
+def : Pat<
+  (tmsselect GPRegs:$false, GPRegs:$true, timm:$trueimm, predwrapper1:$truereg),
+  (mvselect GPRegs:$true, GPRegs:$false, imm:$trueimm, predwrapper1:$truereg)>;
+
+///////////////////////////////////////////////////////////////////////////////
+// ADD/SUB using addressing modes                                            //
+///////////////////////////////////////////////////////////////////////////////
+
+// NKim, includes doubleword, word and halfword variants for both sides (A/B),
+// this helps folding add/shift chains (as commonly produced by address scaling)
+// into one single machine instruction
+
+let Supported = units_d in {
+defm add_am : add_addrmode<add, shl, d_form>;
+
+// the same as for add instructions using addressing modes applies here too.
+// The only difference is the lack of doubleword addressing
+
+defm sub_am : sub_addrmode<sub, shl, d_form>;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // SPECIAL instructions                                                      //
 ///////////////////////////////////////////////////////////////////////////////
 
-// byte swap, see instruction description
+// byte swap, see SPRU732 instruction description
 
 def swap2 : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
     "swap2\t.S1\t$src,\t$dst", [], 0, unit_s>;
 
 // swap4 goes on L units only
 def swap4 : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
-    "swap4\t.L1\t$src,\t$dst", [], 0, unit_l>;
+                 "swap4\t.L1\t$src,\t$dst", [], 0, unit_l>;
 
 let Itinerary = Multiply16,
     hasDelaySlot = 1,
     DelaySlots = 1 in
 {
   def bitr : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
-  "bitr\t.M1\t$src,\t$dst", [], 0, unit_m>;
+                  "bitr\t.M1\t$src,\t$dst", [], 0, unit_m>;
 }
 
-// strangely that does not work for the llvm-byteswap intrinsic, most probably
-// due to a sign/zero extension, however, the bitr instruction does work...
+// using swap2/swap4 combo (if possible) for the byteswap instrinsic takes
+// actually the same amount of cycles but does not occupy the M unit...
+
 // def : Pat<(i32 (bswap GPRegs:$src)), (swap4 (swap2 GPRegs:$src))>;
 def : Pat<(i32 (bswap GPRegs:$src)), (bitr GPRegs:$src)>;
 
@@ -466,140 +462,138 @@ def andn : inst<(outs GPRegs:$dst),
 def : Pat<(i32 (not (and GPRegs:$src1, GPRegs:$src2))),
     (andn GPRegs:$src1, GPRegs:$src2)>;
 
-// counting leading zeroes can be done pretty quickly by using lmbd
+// counting leading zeroes can be done pretty quickly by using lmbd, define
+// matching patterns properly, eventhough ctlz, cttz, etc. are not matched
+// yet for our selection of testing benchmarks
+
 def lmbd : inst<(outs GPRegs:$dst),
     (ins GPRegs:$src1, GPRegs:$src2, pred:$predReg),
     "lmbd\t.L1\t$src1,\t$src2,\t$dst", [], 0, unit_l>;
-
-// TODO define a pattern !
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // BRANCH instructions                                                       //
 ///////////////////////////////////////////////////////////////////////////////
 
-// NOTE, we do not yet declare the unconditional branches as being a barrier
-// since there is a way of a branch being predicated, will check again later
-
-let isBranch = 1,
-    Itinerary = Branch,
-    isTerminator = 1,
-    DelaySlots = 5,
-    hasDelaySlot = 1 in
-{
-
-// the following unconditional calls are barriers (ie. execution stops with the
-// branch; as in other cases, this property does not (need to) hold after
+// the following unconditional branches are barriers (ie. execution stops with
+// the branch; as in other cases, this property does not (need to) hold after
 // post-pass scheduling, b/c of delay slots)
-let isBarrier = 1 in
+
+def branch : branchinst<(outs), (ins BranchTargetOperand:$block),
+                        "b\t$block", [], 0>;
+
+def branch_A : branchinst<(outs), (ins BranchTargetOperand:$block),
+                          "b\t.S1\t$block", [], 0>;
+
+def branch_B : branchinst<(outs), (ins BranchTargetOperand:$block),
+                          "b\t.S2\t$block", [], 1>;
+
+def branch_reg : branchinst<(outs), (ins GPRegs:$reg),
+                            "b\t.S2X\t$reg", [], 1>
 {
-  def branch : inst<(outs), (ins BranchTargetOperand:$block),
-                    "b\t$block", [(br bb:$block)], 0, unit_s>
-  {
-    let Pattern = sched_pattern;
-  }
-
-  def branch_A : inst<(outs), (ins BranchTargetOperand:$block),
-                      "b\t.S1\t$block", [(br bb:$block)], 0, unit_s>;
-
-  def branch_B : inst<(outs), (ins BranchTargetOperand:$block),
-                      "b\t.S2\t$block", [(br bb:$block)], 1, unit_s>;
-} // isBarrier
-
-  // nodefaultpred_inst: predicate operands are added manually
-  def branch_cond : nodefaultpred_inst<(outs), (ins BranchTargetOperand:$block),
-                      "b\t.S1\t$block",
-                       [(brcond_node bb:$block, timm:$a, predwrapper1:$b)],
-                       0, unit_s>
-  {
-    let Pattern = sched_pattern;
-    // not a barrier
-  }
-
-  // indirect (register) branches
-  def branch_reg : inst<(outs), (ins GPRegs:$reg),
-                        "b\t.S2X\t$reg",
-                         [(brind GPRegs:$reg)], 1, unit_s>
-  {
-    let Pattern = sched_pattern;
-    // XXX barrier, or can be conditional?
-    let isBarrier = 1;
-  }
-} // isBranch
-
-
-// XXX XXX XXX: callp is a c64x+ instruction, which the assembler is unlikely
-// to swallow right now. How does TI do branches-with-return-addr on c64x?
-let isCall = 1, isPredicable = 0,
-        Defs = [A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A16, A17, A18, A19,
-                A20, A21, A22, A23, A24, A25, A26, A27, A28, A29, A30, A31,
-                B0, B1, B2, B3, B4, B5, B6, B7, B8, B9, B16, B17, B18, B19,
-                B20, B21, B22, B23, B24, B25, B26, B27, B28, B29, B30, B31,
-    // B15: stack pointer. actually an implicit use (of an undefined reg).
-    // don't know how to model that though
-    B15 ] in {
-
-// NB: Only side 2 callp instructions can be used - this is because they store
-// the return address in register 3, on whichever side the callp was executed
-// upon. So callp .S1 puts ret in A3, which isn't consistent with the TI
-// calling convention.
-
-// this is a call issued to an address which is globally visible
-def callp_global : inst<(outs), (ins CallTargetOperand:$dst, variable_ops),
-                        "callp\t.S2\t$dst,\tB3",
-                        [(TMS320C64Xcall tglobaladdr:$dst)], 1, unit_s>
-{
-  let Pattern = sched_pattern;
+  // NKim, this one is considered to be a barrier as well, additionally mark
+  // to be an indirect branch. This eliminates bugs when querying machine-instr
+  // descriptors for 'isConditionalBranch', 'isFallthrough', etc.
+  let isIndirectBranch = 1;
 }
 
-// this is a call issued to a symbol which is defined externally
-def callp_extsym : inst<(outs), (ins CallTargetOperand:$dst, variable_ops),
-                        "callp\t.S2\t$dst,\tB3",
-                        [(TMS320C64Xcall texternalsym:$dst)], 1, unit_s>
-{
-  let Pattern = sched_pattern;
-}
-
-// NKim, indirect call, this actually produces the same code as an indirect
-// branch, however, the semantics are slightly different as you can think
-def call_reg : inst<(outs), (ins GPRegs:$reg, variable_ops),
-                    "b\t.S2X\t$reg",
-                    [(TMS320C64Xcall GPRegs:$reg)], 1, unit_s>
+// nodefaultpred_inst: predicate operands are added manually
+def branch_cond : nodefaultpred_inst<(outs), (ins BranchTargetOperand:$block),
+                    "b\t.S1\t$block",
+                     [(brcond_node bb:$block, timm:$a, predwrapper1:$b)],
+                     0, unit_s>
 {
   let isBranch = 1;
   let Itinerary = Branch;
+  let isTerminator = 1;
   let DelaySlots = 5;
   let hasDelaySlot = 1;
-
   let Pattern = sched_pattern;
-  let Uses = [B3];
+  let isTerminator = 1;
+  let isBarrier = 0;
 }
-} // isCall
 
-// NB: branch-to-register can only work on unit S2
-// Epilogue code should juggle the return addr into B3.
-// We always put the branch on this side.
-def ret : inst<(outs), (ins), "b\t.S2\tB3", [(retflag)], 1, unit_s> {
-        let isReturn = 1;
-        let isTerminator = 1;
-        let isBarrier = 1;
-        let isPredicable = 0;
-        let Pattern = sched_pattern;
+// NKim, define matching patterns explicitly, this does not seem to have any
+// serious effect beside removing nasty tblgen warnings, for regular non-reg
+// branches match general (side-less) pattern only
 
-        // The implicit use of the return address in B3:
-        //   let Uses = [B3];
-        // is not defined here but added when the epilogue is inserted.
-        // Otherwise early phases would lack the respective def of B3.
+def : Pat<(br bb:$block), (branch bb:$block)>;
+def : Pat<(brind GPRegs:$dst), (branch_reg GPRegs:$dst)>;
+
+///////////////////////////////////////////////////////////////////////////////
+// CALL/RET instructions                                                     //
+///////////////////////////////////////////////////////////////////////////////
+
+def callp_global : callinst<(outs), (ins CallTargetOperand:$dst, variable_ops),
+                            "callp\t.S2\t$dst,\tB3", []>;
+
+def callp_extsym : callinst<(outs), (ins CallTargetOperand:$dst, variable_ops),
+                            "callp\t.S2\t$dst,\tB3", []>;
+
+def call_reg : callbranchinst<(outs), (ins GPRegs:$dst, variable_ops),
+                              "b\t.S2X\t$dst", []>;
+{
+  // when using the b-instruction, calls need to be treated as branches
+  let isIndirectBranch = 1;
+}
+
+def call_branch : callbranchinst<(outs),
+                                 (ins CallTargetOperand:$dst, variable_ops),
+                                 "b\t.S2\t$dst", [ /* keep empty ! */ ]>;
+{
+  // when using the b-instruction, calls need to be treated as branches
+  let isBranch = 1;
+}
+
+def ret : inst<(outs), (ins), "b\t.S2\tB3", [], 1, unit_s> {
+
+  // this drops predicate operands and makes the instruction non
+  // predicable, which is potentially a source for subtle bugs...
+  let InOperandList = (ins);
+
+  let isReturn = 1;
+  let isTerminator = 1;
+  let isBarrier = 1;
+  let isPredicable = 0;
+  let Pattern = sched_pattern;
+
+  // The implicit use of the return address in B3:
+  // let Uses = [B3];
+  // is not defined here but added when the epilogue is inserted.
+  // Otherwise early phases would lack the respective def of B3.
 
   let Itinerary = Branch;
   let hasDelaySlot = 1;
   let DelaySlots = 5;
 }
 
+// NKim, instruction for emitting a returning pad for an indirectly called
+// routine. I model this as a pseudo-instruction, since this correspond to
+// a label. NOTE, we need to signal, that this pseudo-instruction may have
+// side-effects in order to avoid elimination by the optimizers !
+
+def call_return_label : pseudoinst<(outs), (ins LabelOperand:$label),
+                                   "$label:\t\t${:comment} return label", []>
+{
+  let isCodeGenOnly = 0;
+  let isPredicable = 0;
+  let neverHasSideEffects = 0;
+}
+
+// defining matching patterns explicitly removes nasty tblgen warnings...
+def : Pat<(TMS320C64Xcall tglobaladdr:$dst), (callp_global tglobaladdr:$dst)>;
+def : Pat<(TMS320C64Xcall texternalsym:$dst), (callp_global texternalsym:$dst)>;
+def : Pat<(TMS320C64Xcall GPRegs:$reg), (call_reg GPRegs:$reg)>;
+def : Pat<(retflag), (ret)>;
+
+def : Pat<(call_label_operand_node texternalsym:$label),
+            (mvkh_label_1 texternalsym:$label,
+              (mvkl_label_1 texternalsym:$label))>;
+
+def : Pat<(call_return_label_node texternalsym:$label),
+          (call_return_label texternalsym:$label)>;
+
 ///////////////////////////////////////////////////////////////////////////////
-//                                                                           //
 // side-specific instructions                                                //
-//                                                                           //
 ///////////////////////////////////////////////////////////////////////////////
 
 let Supported = units_notm in {

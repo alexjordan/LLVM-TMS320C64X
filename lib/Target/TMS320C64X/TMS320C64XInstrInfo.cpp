@@ -118,6 +118,12 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
     ,{ C64X::srl_rr_1,       C64X::srl_rr_2 }
     ,{ C64X::srl_ri_1,       C64X::srl_ri_2 }
 
+    ,{ C64X::add_am_d_1,     C64X::add_am_d_2 }
+    ,{ C64X::add_am_w_1,     C64X::add_am_w_2 }
+    ,{ C64X::add_am_h_1,     C64X::add_am_h_2 }
+    ,{ C64X::sub_am_w_1,     C64X::sub_am_w_2 }
+    ,{ C64X::sub_am_h_1,     C64X::sub_am_h_2 }
+
     ,{ C64X::mvk_1,          C64X::mvk_2 }
     ,{ C64X::mvkl_1,         C64X::mvkl_2 }
     ,{ C64X::mvkh_1,         C64X::mvkh_2 }
@@ -668,15 +674,42 @@ unsigned TMS320C64XInstrInfo::isStoreToStackSlot(const MachineInstr *MI,
 bool
 TMS320C64XInstrInfo::isPredicated(const MachineInstr *MI) const {
 
-  int pred_idx, pred_val;
-
-  pred_idx = MI->findFirstPredOperandIdx();
+  const int pred_idx = MI->findFirstPredOperandIdx();
 
   if (pred_idx == -1) return false;
 
-  pred_val = MI->getOperand(pred_idx).getImm();
+  const int pred_val = MI->getOperand(pred_idx).getImm();
 
   if (pred_val == -1) return false;
+
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+
+bool TMS320C64XInstrInfo::PredicateInstruction(MachineInstr *MI,
+                             const SmallVectorImpl<MachineOperand> &pred) const
+{
+  assert(MI && "Invalid machine instruction detected, can't predicate!");
+
+  if (!isPredicable(MI)) return false;
+
+  int predIndex = MI->findFirstPredOperandIdx();
+ 
+  if (predIndex != -1) {
+    MachineOperand &predImmOperand = MI->getOperand(predIndex);
+    MachineOperand &predRegOperand = MI->getOperand(predIndex + 1);
+    predImmOperand.setImm(pred[0].getImm());
+    predRegOperand.setReg(pred[1].getReg());
+  }
+/*
+  else {
+    // if there is no predicate operands being set until now, create and set
+    // both of them. NOTE, we are dealing with predicable instructions 
+    MI->addOperand(MachineOperand::CreateImm(pred[0].getImm()));
+    MI->addOperand(MachineOperand::CreateReg(pred[1].getReg(), false));
+  }
+*/
 
   return true;
 }

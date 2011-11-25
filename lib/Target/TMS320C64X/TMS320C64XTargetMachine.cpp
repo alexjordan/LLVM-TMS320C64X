@@ -30,8 +30,13 @@
 #include "llvm/PassManager.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Target/TargetRegistry.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
+
+static cl::opt<bool> EnableIfConversion("if-conversion",
+  cl::Hidden, cl::desc("Perform an if-conversion for the TMS320C64X target"),
+  cl::init(false));
 
 //-----------------------------------------------------------------------------
 
@@ -106,3 +111,19 @@ bool TMS320C64XTargetMachine::addPreEmitPass(PassManagerBase &PM,
     PM.add(createTMS320C64XDelaySlotFillerPass(*this));
   return true;
 }
+
+//-----------------------------------------------------------------------------
+
+bool TMS320C64XTargetMachine::addPostISel(PassManagerBase &PM,
+                                          CodeGenOpt::Level OptLevel)
+{
+  if (EnableIfConversion) {
+    PM.add(createTMS320C64XIfConversionPass(*this));
+
+    // NKim, makes sense to run a taildup + eventually a machine dce passes
+    // afterward, due to a flatten out cfg and basic phi-elim/restructuring
+    return true;
+  }
+  return false;
+}
+

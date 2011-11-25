@@ -124,7 +124,11 @@ void initializeLiveIntervalsPass(PassRegistry&);
 void initializeLiveStacksPass(PassRegistry&);
 void initializeLiveVariablesPass(PassRegistry&);
 void initializeLoaderPassPass(PassRegistry&);
+
+// Added profile loader for machine profile info
 void initializePathProfileLoaderPassPass(PassRegistry&);
+void initializeMachineLoaderPassPass(PassRegistry&);
+
 void initializeLoopDeletionPass(PassRegistry&);
 void initializeLoopDependenceAnalysisPass(PassRegistry&);
 void initializeLoopExtractorPass(PassRegistry&);
@@ -148,6 +152,15 @@ void initializeMachineLICMPass(PassRegistry&);
 void initializeMachineLoopInfoPass(PassRegistry&);
 void initializeMachineLoopRangesPass(PassRegistry&);
 void initializeMachineModuleInfoPass(PassRegistry&);
+
+// NKim, create a separate analysis group for the profiler,
+// together with the information reconstructor/loader pass
+void initializeMachineProfileAnalysisAnalysisGroup(PassRegistry&);
+void initializeMachineProfileLoaderPass(PassRegistry&);
+
+// NKim, initialize the pass for superblock-creation
+void initializeSuperblockFormationPass(PassRegistry&);
+
 void initializeMachineSinkingPass(PassRegistry&);
 void initializeMachineVerifierPassPass(PassRegistry&);
 void initializeMemCpyOptPass(PassRegistry&);
