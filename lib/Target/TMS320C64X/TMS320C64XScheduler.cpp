@@ -189,7 +189,6 @@ bool TMS320C64XScheduler::addTerminatorInstr(MachineBasicBlock *MBB) {
     if (I->getDesc().isBranch() ||
         I->getDesc().isReturn() ||
         I->getDesc().isIndirectBranch()) {
-      dbgs() << "adding BR_OCCURS after: "; I->dump();
       BuildMI(*MBB, ++I, dl, TII->get(TMS320C64X::BR_OCCURS));
       count++;
     } else
