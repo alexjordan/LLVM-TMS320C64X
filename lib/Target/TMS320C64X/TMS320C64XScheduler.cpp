@@ -186,7 +186,10 @@ bool TMS320C64XScheduler::addTerminatorInstr(MachineBasicBlock *MBB) {
   for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end(); I != E;) {
     // XXX actually insert the pseudo-instruction after every branch: includes
     // indirect calls and would also work with side-exit branches.
-    if (I->getDesc().isBranch() || I->getDesc().isReturn()) {
+    if (I->getDesc().isBranch() ||
+        I->getDesc().isReturn() ||
+        I->getDesc().isIndirectBranch()) {
+      dbgs() << "adding BR_OCCURS after: "; I->dump();
       BuildMI(*MBB, ++I, dl, TII->get(TMS320C64X::BR_OCCURS));
       count++;
     } else

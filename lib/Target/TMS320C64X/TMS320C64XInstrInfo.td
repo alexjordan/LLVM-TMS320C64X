@@ -529,10 +529,18 @@ def callp_extsym : callinst<(outs), (ins CallTargetOperand:$dst, variable_ops),
 
 def call_reg : callbranchinst<(outs), (ins GPRegs:$dst, variable_ops),
                               "b\t.S2X\t$dst", []>;
+{
+  // when using the b-instruction, calls need to be treated as branches
+  let isIndirectBranch = 1;
+}
 
 def call_branch : callbranchinst<(outs),
                                  (ins CallTargetOperand:$dst, variable_ops),
                                  "b\t.S2\t$dst", [ /* keep empty ! */ ]>;
+{
+  // when using the b-instruction, calls need to be treated as branches
+  let isBranch = 1;
+}
 
 def ret : inst<(outs), (ins), "b\t.S2\tB3", [], 1, unit_s> {
 
