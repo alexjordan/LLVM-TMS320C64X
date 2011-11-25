@@ -448,6 +448,9 @@ bool UAS::rewriteAssignedCluster(SUnit *SU, unsigned side) {
 
 void UAS::rewriteDefs(SUnit *SU) {
   MachineInstr *MI = SU->getInstr();
+  if (!MI->getNumOperands())
+    return;
+
   MachineOperand &MO = MI->getOperand(0);
   if (!MO.isReg() || !MO.isDef()
       || !TargetRegisterInfo::isVirtualRegister(MO.getReg())
