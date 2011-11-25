@@ -18,10 +18,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/ADT/Statistic.h"
-
 #include "llvm/Support/Debug.h"
-#undef DEBUG
-#define DEBUG(x) x
 
 using namespace llvm;
 using namespace llvm::TMS320C64X;

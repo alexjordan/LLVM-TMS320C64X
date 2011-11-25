@@ -20,12 +20,9 @@
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-
-#include "llvm/Support/Debug.h"
-#undef DEBUG
-#define DEBUG(x) x
 
 using namespace llvm;
 using namespace llvm::TMS320C64X;
@@ -102,24 +99,6 @@ struct DagAssign : public TMS320C64XClusterAssignment {
   void applyXccUses(MachineFunction &Fn, const AssignmentState &State);
   void assignPHIs(AssignmentState *State, MachineBasicBlock *MBB);
 };
-
-#if 0
-struct UAS : public TMS320C64XClusterAssignment {
-
-  std::vector<SUnit> SUnits;
-  std::vector<SUnit*> Sequence;
-  MachineBasicBlock::iterator Begin, End;
-  MachineBasicBlock *BB;
-  std::vector<MachineInstr *>DbgValueVec; // XXX needed?
-
-  UAS(TargetMachine &tm) : TMS320C64XClusterAssignment(tm) {}
-
-  virtual void assignBasicBlock(MachineBasicBlock *MBB);
-
-  MachineBasicBlock *EmitSchedule();
-
-};
-#endif
 }
 
 static cl::opt<AssignmentAlgorithm>
@@ -368,7 +347,8 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
   }
 
   Fn.verifySSA(this, "After Cluster Assignment");
-  Fn.dump();
+  if (DebugFlag && isCurrentDebugType(DEBUG_TYPE))
+    Fn.dump();
 
   delete Scheduler;
   delete RA;

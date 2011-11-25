@@ -28,9 +28,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include <set>
 
-#undef DEBUG
-#define DEBUG(x) x
-
 using namespace llvm;
 using namespace TMS320C64X;
 
@@ -144,8 +141,8 @@ bool ResourceAssignment::ScheduleOnSide(SUnit *SU, unsigned side) {
       if ((support >> unit) & 0x1) {
         MachineOperand &unitOp = MI->getOperand(MI->getNumOperands() - 1);
         unitOp.setImm(unit << 1);
-        DBGSCHED(dbgs(), MI) << "scheduled on unit ."
-          << TMS320C64XInstrInfo::getUnitStrings()[unit] << "\n";
+        DEBUG(DBGSCHED(dbgs(), MI) << "scheduled on unit ."
+          << TMS320C64XInstrInfo::getUnitStrings()[unit] << "\n");
         udx = getUnitIndex(side, unit);
         break;
       }
@@ -160,7 +157,8 @@ bool ResourceAssignment::ScheduleOnSide(SUnit *SU, unsigned side) {
         xuse = (side == 0) ? TMS320C64X::X1 : TMS320C64X::X2;
     }
 
-    DBGSCHED(dbgs(), MI) << "xuse: " << (xuse?getExtraStr(xuse):"none") << "\n";
+    DEBUG(DBGSCHED(dbgs(), MI) << "xuse: " << (xuse?getExtraStr(xuse):"none")
+                               << "\n");
 
   } else {
     udx = getUnitIndex(SU);
@@ -371,12 +369,12 @@ std::string ResourceAssignment::getExtraStr(unsigned xuse) {
 void ResourceAssignment::dbgUnitBusy(SUnit *SU, unsigned idx) const {
   static std::string ustr[] = {"L1", "L2", "S1", "S2", "M1", "M2", "D1", "D2"};
   const MachineInstr *MI = SU->getInstr();
-  DBGSCHED(dbgs(), MI) << ustr[idx] << " conflict\n";
+  DEBUG(DBGSCHED(dbgs(), MI) << ustr[idx] << " conflict\n");
 }
 
 void ResourceAssignment::dbgExtraBusy(SUnit *SU, unsigned xidx) const {
   const MachineInstr *MI = SU->getInstr();
-  DBGSCHED(dbgs(), MI) << getExtraStr(xidx) << " conflict\n";
+  DEBUG(DBGSCHED(dbgs(), MI) << getExtraStr(xidx) << " conflict\n");
 }
 
 //-----------------------------------------------------------------------------
