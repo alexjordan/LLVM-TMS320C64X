@@ -335,6 +335,12 @@ public:
     return true;
   }
 
+  /// NKim - addPostISel - this hook is provided for passes which need to be
+  /// run after the Isel, but before the regalloc or pre-regalloc scheduler
+  virtual bool addPostISel(PassManagerBase &, CodeGenOpt::Level) {
+    return true;
+  }
+
   /// addInstSelector - This method should install an instruction selector pass,
   /// which converts from LLVM code to machine instructions.
   virtual bool addInstSelector(PassManagerBase &, CodeGenOpt::Level) {

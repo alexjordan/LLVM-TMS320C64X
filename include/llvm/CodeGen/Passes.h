@@ -27,6 +27,17 @@ namespace llvm {
   class RegisterCoalescer;
   class raw_ostream;
 
+  /// NKim, createMachineProfileLoaderPass - Create a pass for loading profi-
+  /// le information for machine functions, machine basic blocks and edges
+  /// between them
+  FunctionPass *createMachineProfileLoaderPass();
+
+  /// NKim, createSuperblockFormationPass - After the profiled paths have
+  /// been reconstructed, a superblock formation can take place which identi-
+  /// fies suitable regions and performs a tail-duplication in order to eli-
+  /// minate side entries
+  FunctionPass *createSuperblockFormationPass();
+
   /// createUnreachableBlockEliminationPass - The LLVM code generator does not
   /// work well with unreachable basic blocks (what live ranges make sense for a
   /// block that cannot be reached?).  As such, a code generator should either
