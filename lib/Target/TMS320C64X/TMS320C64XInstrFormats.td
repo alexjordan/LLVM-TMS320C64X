@@ -199,6 +199,13 @@ def nodefault_reg : PredicateOperand<i32, (ops PredRegs), (ops)>;
 // NKIM, supply the root-node to the func, not sure about parent or root
 def predwrapper1 : ComplexPattern<i32, 1, "bounce_predicate", [], [SDNPWantRoot]>;
 
+///////////////////////////////////////////////////////////////////////////////
+// GENERIC instruction, this is a superclass all TMS machine instructions de-//
+// rive from. NOTE, this needs reworking for a more distinctive separation   //
+// from the side-specific instructions (see below) and more flexibility for  //
+// the cluster allocation                                                    //
+///////////////////////////////////////////////////////////////////////////////
+
 class inst<dag outops,
            dag inops,
            string asm_str,
@@ -247,8 +254,216 @@ class inst<dag outops,
   let TSFlags{14} = SideInst; // inst or c64sideinst
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// side-specific instructions                                                //
+///////////////////////////////////////////////////////////////////////////////
+
+class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
+: Instruction
+{
+  // All insns are conditional unless stated otherwise
+  let isPredicable = 1;
+  let CodeSize = 4;
+
+  let Namespace = "TMS320C64X";
+
+  let OutOperandList = outops;
+  let InOperandList = !con(inops, (ins pred:$s, default_form:$fu));
+
+  let Itinerary = Default;
+  let neverHasSideEffects = 1;
+
+  //string sidestr = !strconcat("\t.", !if(side.intval, "1", "0"));
+  let AsmString = !strconcat(mnemonic, "\t.$fu\t$src1,\t$src2,\t$dst");
+
+  // side-specific instructions don't match
+  let Pattern = [];
+
+  UnitSupport Supported = units_any; // different to inst class
+  bits<3> DelaySlots = 0;
+  bit MemAccess = 0;
+  bits<2> MemShift = 0;
+  bit MemLoadStore = 0;
+  InstUnit DefaultUnit = InstUnit<0>; // not used for this inst kind
+  bit SideInst = 1; // yes this is a flexible c64sideinst
+
+  let TSFlags{3-0} = Supported.units; // unit support
+  let TSFlags{4} = side.bitval; // cluster side (0: A, 1: B)
+  let TSFlags{7-5} = DelaySlots; // (range: [0,5])
+  let TSFlags{8} = MemAccess; // (instr is load/store)
+  let TSFlags{10-9} = MemShift; // mem_shift_amt (XXX)
+  let TSFlags{11} = MemLoadStore; // (0 for load, 1 for store)
+  let TSFlags{13-12} = DefaultUnit.unit; // fixed/default unit
+  let TSFlags{14} = SideInst; // inst or c64sideinst
+}
+
+class c64new<dag outops, dag inops, string mnemonic, InstructionForm format,
+             InstSide side>
+    : c64sideinst<outops, inops, mnemonic, side> {
+
+  let InOperandList = !con(inops, (ins pred:$s, format:$fu));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NKim, this class has been provided to capture call instructions. These do  //
+// currently execute on the S unit on the 2 side only. Also note, that having //
+// calls being defined this way removes anomalies about setting/non-setting   //
+// 'isPredicable' flag (i.e. honor 'let isPredicable' now...)                 //
+////////////////////////////////////////////////////////////////////////////////
+
+class callinst<dag outops, dag inops, string asmstr, list<dag> pat>
+: inst<outops, inops, asmstr, pat, 1, unit_s>
+{
+  // NKim, do not require predicate-operands for regular call instructions,
+  // this also solves the problem of proper values for 'isPredicable' flag
+  let InOperandList = inops;
+
+  let isCall = 1;
+  let isPredicable = 0;
+  let Pattern = sched_pattern;
+
+  // B15: stack pointer. actually an implicit use (of an undefined reg).
+  // don't know how to model that though
+  let Defs = [A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A16, A17, A18, A19,
+              A20, A21, A22, A23, A24, A25, A26, A27, A28, A29, A30, A31,
+              B0, B1, B2, B3, B4, B5, B6, B7, B8, B9, B16, B17, B18, B19,
+              B20, B21, B22, B23, B24, B25, B26, B27, B28, B29, B30, B31,
+              B15];
+}
+
+// NKim, do not use for isel, provided for experiments (s.a. call-rewriting)
+// to be custom inserted within post-isel optimization passes. Will eventually
+// be removed in future after the effect-evaluation is done :-)
+
+class callbranchinst<dag outops, dag inops, string asmstr, list<dag> pat>
+: callinst<outops, inops, asmstr, pat>
+{
+  // calls as branches are actually predicable
+  let InOperandList = !con(inops, (ins pred:$s));
+  let Itinerary = Branch;
+  let isPredicable = 1;
+  let hasDelaySlot = 1;
+  let DelaySlots = 5;
+  let Uses = [B3];
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// class capturing regular branches, these can be issued on any side, but are //
+// strictly tied to S units only                                              //
+////////////////////////////////////////////////////////////////////////////////
+
+class branchinst<dag outops, dag inops, string asm, list<dag> pat, bit side>
+: inst<outops, inops, asm, pat, side, unit_s>
+{
+  let isBranch = 1;
+  let isBarrier = 1;
+  let Itinerary = Branch;
+  let isTerminator = 1;
+  let DelaySlots = 5;
+  let hasDelaySlot = 1;
+  let Pattern = sched_pattern;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// multiclass template for ADD-variants using addressing modes, this greatly  //
+// helps eliminating shift/add chains when scaling operands for memory loads/ //
+// stores. We only support register variants for the time being.              //
+////////////////////////////////////////////////////////////////////////////////
+
+multiclass add_addrmode <SDNode addOp, SDNode shiftOp, InstructionForm form> {
+
+  // A-side add's using doubleword/word/halfword addressing modes
+
+  def _ada : c64new<(outs ARegs:$dst),
+               (ins ARegs:$src1, ARegs:$src2), "addad", form, side_a>
+  {
+    let Pattern = [(set ARegs:$dst,
+      (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 3))))];
+  }
+
+  def _awa : c64new<(outs ARegs:$dst),
+               (ins ARegs:$src1, ARegs:$src2), "addaw", form, side_a>
+  {
+    let Pattern = [(set ARegs:$dst,
+      (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 2))))];
+  }
+
+  def _aha : c64new<(outs ARegs:$dst),
+               (ins ARegs:$src1, ARegs:$src2), "addah", form, side_a>
+  {
+    let Pattern = [(set ARegs:$dst,
+      (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 1))))];
+  }
+
+  // B-side add's using doubleword/word/halfword addressing modes
+
+  def _adb : c64new<(outs BRegs:$dst),
+               (ins BRegs:$src1, BRegs:$src2), "addad", form, side_b>
+  {
+    let Pattern = [(set BRegs:$dst,
+      (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 3))))];
+  }
+
+  def _awb : c64new<(outs BRegs:$dst),
+               (ins BRegs:$src1, BRegs:$src2), "addaw", form, side_b>
+  {
+    let Pattern = [(set BRegs:$dst,
+      (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 2))))];
+  }
+
+  def _ahb : c64new<(outs BRegs:$dst),
+               (ins BRegs:$src1, BRegs:$src2), "addah", form, side_b>
+  {
+    let Pattern = [(set BRegs:$dst,
+      (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 1))))];
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// SUB-variants using addressing modes. The same as for adds applies here too.//
+////////////////////////////////////////////////////////////////////////////////
+
+multiclass sub_addrmode <SDNode addOp, SDNode shiftOp, InstructionForm form > {
+
+  // A-side sub's using word/halfword addressing mode. No dw here
+
+  def _awa : c64new<(outs ARegs:$dst),
+               (ins ARegs:$src1, ARegs:$src2), "subaw", form, side_a>
+  {
+    let Pattern = [(set ARegs:$dst,
+      (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 2))))];
+  }
+
+  def _aha : c64new<(outs ARegs:$dst),
+               (ins ARegs:$src1, ARegs:$src2), "subah", form, side_a>
+  {
+    let Pattern = [(set ARegs:$dst,
+      (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 1))))];
+  }
+
+  // B-side add's using word/halfword addressing modes. No dw here
+
+  def _awb : c64new<(outs BRegs:$dst),
+               (ins BRegs:$src1, BRegs:$src2), "subaw", form, side_b>
+  {
+    let Pattern = [(set BRegs:$dst,
+      (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 2))))];
+  }
+
+  def _ahb : c64new<(outs BRegs:$dst),
+               (ins BRegs:$src1, BRegs:$src2), "subah", form, side_b>
+  {
+    let Pattern = [(set BRegs:$dst,
+      (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 1))))];
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// class for predicate-less pseudos for manual patching                       //
+////////////////////////////////////////////////////////////////////////////////
+
 class pseudoinst<dag outops, dag inops, string asm, list<dag> pat>
-  : inst<outops, inops, asm, pat, 0, unit_d>
+: inst<outops, inops, asm, pat, 0, unit_d>
 {
   let InOperandList = inops;
   let Pattern = pat;
@@ -331,18 +546,18 @@ class pseudo_ri<string mnemonic, string sidespec, dag imm, InstUnit u,
   let Pattern = sched_pattern;
 }
 
-////////////////////////////////////////////////////////////////////////////
-// this class has been provided to capture the mvkl/mvkh instruction variants.
-// These instructions are supposed to be executed on the S-unit only. Since
-// there is no real instruction for loading a 32-bit immediate into a register,
-// this is done by decomposing it into a "move high" immediately following a
-// "move low" instruction. For that reason we do not specify a pattern, but
-// match the instruction explicitly later. NOTE, we do not restrict the inst-
-// ruction by the register-side constraints
+////////////////////////////////////////////////////////////////////////////////
+// this class has been provided to capture the mvkl/mvkh instruction variants.//
+// These instructions are supposed to be executed on the S-unit only. Since   //
+// there is no real instruction for loading a 32-bit immediate into a regis-  //
+// ter, this is done by decomposing it into a "move high" immediately after   //
+// the "move low" instruction. For that reason we do not specify a pattern,   //
+// but match the instruction explicitly later. NOTE, we do not restrict the   //
+// instruction by the register-side constraints                               //
+////////////////////////////////////////////////////////////////////////////////
 
 class moveInstr<dag outs, dag ins, string asm, bit side, InstUnit u>
 : inst<outs, ins, asm, [], side, u>;
-
 
 ////////////////////////////////////////////////////////////////////////////
 // AJO: these are legacy pseudo classes for load and store operations,
@@ -385,56 +600,6 @@ multiclass meminst_store_p<string mnemonic, PatFrag op> {
 multiclass meminst_p<string mnemonic, PatFrag loadop, PatFrag storeop> :
   meminst_load_p<mnemonic, loadop>,
   meminst_store_p<mnemonic, storeop>;
-
-///////////////////////////////////////////////////////////////////////////////
-// side-specific instructions                                                //
-///////////////////////////////////////////////////////////////////////////////
-
-class c64sideinst<dag outops, dag inops, string mnemonic, InstSide side>
-: Instruction
-{
-  // All insns are conditional unless stated otherwise
-  let isPredicable = 1;
-  let CodeSize = 4;
-
-  let Namespace = "TMS320C64X";
-
-  let OutOperandList = outops;
-  let InOperandList = !con(inops, (ins pred:$s, default_form:$fu));
-
-  let Itinerary = Default;
-  let neverHasSideEffects = 1;
-
-  //string sidestr = !strconcat("\t.", !if(side.intval, "1", "0"));
-  let AsmString = !strconcat(mnemonic, "\t.$fu\t$src1,\t$src2,\t$dst");
-
-  // side-specific instructions don't match
-  let Pattern = [];
-
-  UnitSupport Supported = units_any; // different to inst class
-  bits<3> DelaySlots = 0;
-  bit MemAccess = 0;
-  bits<2> MemShift = 0;
-  bit MemLoadStore = 0;
-  InstUnit DefaultUnit = InstUnit<0>; // not used for this inst kind
-  bit SideInst = 1; // yes this is a flexible c64sideinst
-
-  let TSFlags{3-0} = Supported.units; // unit support
-  let TSFlags{4} = side.bitval; // cluster side (0: A, 1: B)
-  let TSFlags{7-5} = DelaySlots; // (range: [0,5])
-  let TSFlags{8} = MemAccess; // (instr is load/store)
-  let TSFlags{10-9} = MemShift; // mem_shift_amt (XXX)
-  let TSFlags{11} = MemLoadStore; // (0 for load, 1 for store)
-  let TSFlags{13-12} = DefaultUnit.unit; // fixed/default unit
-  let TSFlags{14} = SideInst; // inst or c64sideinst
-}
-
-class c64new<dag outops, dag inops, string mnemonic, InstructionForm format,
-             InstSide side>
-    : c64sideinst<outops, inops, mnemonic, side> {
-
-  let InOperandList = !con(inops, (ins pred:$s, format:$fu));
-}
 
 multiclass c64inst<dag indag, string mnemonic> {
         def _1 : c64sideinst<(outs ARegs:$dst), !con((ins ARegs:$src1), indag),
