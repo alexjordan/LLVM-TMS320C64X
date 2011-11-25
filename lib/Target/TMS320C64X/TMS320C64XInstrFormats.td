@@ -374,21 +374,21 @@ multiclass add_addrmode <SDNode addOp, SDNode shiftOp, InstructionForm form> {
 
   // A-side add's using doubleword/word/halfword addressing modes
 
-  def _ada : c64new<(outs ARegs:$dst),
+  def _d_1 : c64new<(outs ARegs:$dst),
                (ins ARegs:$src1, ARegs:$src2), "addad", form, side_a>
   {
     let Pattern = [(set ARegs:$dst,
       (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 3))))];
   }
 
-  def _awa : c64new<(outs ARegs:$dst),
+  def _w_1 : c64new<(outs ARegs:$dst),
                (ins ARegs:$src1, ARegs:$src2), "addaw", form, side_a>
   {
     let Pattern = [(set ARegs:$dst,
       (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 2))))];
   }
 
-  def _aha : c64new<(outs ARegs:$dst),
+  def _h_1 : c64new<(outs ARegs:$dst),
                (ins ARegs:$src1, ARegs:$src2), "addah", form, side_a>
   {
     let Pattern = [(set ARegs:$dst,
@@ -397,21 +397,21 @@ multiclass add_addrmode <SDNode addOp, SDNode shiftOp, InstructionForm form> {
 
   // B-side add's using doubleword/word/halfword addressing modes
 
-  def _adb : c64new<(outs BRegs:$dst),
+  def _d_2 : c64new<(outs BRegs:$dst),
                (ins BRegs:$src1, BRegs:$src2), "addad", form, side_b>
   {
     let Pattern = [(set BRegs:$dst,
       (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 3))))];
   }
 
-  def _awb : c64new<(outs BRegs:$dst),
+  def _w_2 : c64new<(outs BRegs:$dst),
                (ins BRegs:$src1, BRegs:$src2), "addaw", form, side_b>
   {
     let Pattern = [(set BRegs:$dst,
       (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 2))))];
   }
 
-  def _ahb : c64new<(outs BRegs:$dst),
+  def _h_2 : c64new<(outs BRegs:$dst),
                (ins BRegs:$src1, BRegs:$src2), "addah", form, side_b>
   {
     let Pattern = [(set BRegs:$dst,
@@ -427,14 +427,14 @@ multiclass sub_addrmode <SDNode addOp, SDNode shiftOp, InstructionForm form > {
 
   // A-side sub's using word/halfword addressing mode. No dw here
 
-  def _awa : c64new<(outs ARegs:$dst),
+  def _w_1 : c64new<(outs ARegs:$dst),
                (ins ARegs:$src1, ARegs:$src2), "subaw", form, side_a>
   {
     let Pattern = [(set ARegs:$dst,
       (addOp ARegs:$src1, (shiftOp ARegs:$src2, (i32 2))))];
   }
 
-  def _aha : c64new<(outs ARegs:$dst),
+  def _h_1 : c64new<(outs ARegs:$dst),
                (ins ARegs:$src1, ARegs:$src2), "subah", form, side_a>
   {
     let Pattern = [(set ARegs:$dst,
@@ -443,14 +443,14 @@ multiclass sub_addrmode <SDNode addOp, SDNode shiftOp, InstructionForm form > {
 
   // B-side add's using word/halfword addressing modes. No dw here
 
-  def _awb : c64new<(outs BRegs:$dst),
+  def _w_2 : c64new<(outs BRegs:$dst),
                (ins BRegs:$src1, BRegs:$src2), "subaw", form, side_b>
   {
     let Pattern = [(set BRegs:$dst,
       (addOp BRegs:$src1, (shiftOp BRegs:$src2, (i32 2))))];
   }
 
-  def _ahb : c64new<(outs BRegs:$dst),
+  def _h_2 : c64new<(outs BRegs:$dst),
                (ins BRegs:$src1, BRegs:$src2), "subah", form, side_b>
   {
     let Pattern = [(set BRegs:$dst,

@@ -118,6 +118,12 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
     ,{ C64X::srl_rr_1,       C64X::srl_rr_2 }
     ,{ C64X::srl_ri_1,       C64X::srl_ri_2 }
 
+    ,{ C64X::add_am_d_1,     C64X::add_am_d_2 }
+    ,{ C64X::add_am_w_1,     C64X::add_am_w_2 }
+    ,{ C64X::add_am_h_1,     C64X::add_am_h_2 }
+    ,{ C64X::sub_am_w_1,     C64X::sub_am_w_2 }
+    ,{ C64X::sub_am_h_1,     C64X::sub_am_h_2 }
+
     ,{ C64X::mvk_1,          C64X::mvk_2 }
     ,{ C64X::mvkl_1,         C64X::mvkl_2 }
     ,{ C64X::mvkh_1,         C64X::mvkh_2 }

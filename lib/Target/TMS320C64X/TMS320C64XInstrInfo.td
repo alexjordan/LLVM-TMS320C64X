@@ -418,12 +418,14 @@ def : Pat<
 // this helps folding add/shift chains (as commonly produced by address scaling)
 // into one single machine instruction
 
+let Supported = units_d in {
 defm add_am : add_addrmode<add, shl, d_form>;
 
 // the same as for add instructions using addressing modes applies here too.
 // The only difference is the lack of doubleword addressing
 
 defm sub_am : sub_addrmode<sub, shl, d_form>;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // SPECIAL instructions                                                      //
