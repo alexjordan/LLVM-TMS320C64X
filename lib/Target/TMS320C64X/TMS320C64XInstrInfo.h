@@ -127,6 +127,10 @@ public:
     static ScheduleHazardRecognizer*
     CreatePostRAHazardRecognizer(const TargetMachine *TM);
 
+    // creates the target specific FU scheduler
+    static TMS320C64X::ResourceAssignment*
+    CreateFunctionalUnitScheduler(const TargetMachine *TM);
+
     virtual void copyPhysReg(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator I,
                              DebugLoc DL,
@@ -197,8 +201,20 @@ public:
 
     virtual bool isPredicated(const MachineInstr *MI) const;
 
+    // returns cluster side for MI (ASide = 0, BSide = 1)
+    static int getSide(const MachineInstr *MI);
+
+    // defunct. was used with pseudo opcodes.
     int getOpcodeForSide(int Opcode, int Side) const;
+
+    // used to map an instruction to its version on the opposite cluster side.
     int getSideOpcode(int Opcode, int Side) const;
+
+    // returns true if the instruction has flexible encoding.
+    // (ie. it can be scheduled on different FUs via an operand and there exists
+    // an opcode for the opposite cluster side.
+    static bool isFlexible(const TargetInstrDesc &tid);
+    static bool isFlexible(const MachineInstr *MI);
 
     // NKIM, NON-LLVM-custom stuff, put inside the class, made static, removed
     // implementation bodies in order to avoid header-confusions and building

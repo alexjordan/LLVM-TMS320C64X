@@ -98,6 +98,7 @@ namespace llvm {
   /// ScheduleDAGInstrs - A ScheduleDAG subclass for scheduling lists of
   /// MachineInstrs.
   class ScheduleDAGInstrs : public ScheduleDAG {
+  protected:
     const MachineLoopInfo &MLI;
     const MachineDominatorTree &MDT;
     const MachineFrameInfo *MFI;
@@ -213,6 +214,13 @@ namespace llvm {
 #endif
 
   };
+
+  const Value *getUnderlyingObjectFromInt(const Value *V);
+  const Value *getUnderlyingObject(const Value *V);
+  const Value *getUnderlyingObjectForInstr(const MachineInstr *MI,
+                                           const MachineFrameInfo *MFI,
+                                           bool &MayAlias);
+
 }
 
 #endif

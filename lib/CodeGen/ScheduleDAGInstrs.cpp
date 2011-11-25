@@ -63,7 +63,7 @@ void ScheduleDAGInstrs::Run(MachineBasicBlock *bb,
 
 /// getUnderlyingObjectFromInt - This is the function that does the work of
 /// looking through basic ptrtoint+arithmetic+inttoptr sequences.
-static const Value *getUnderlyingObjectFromInt(const Value *V) {
+const Value *llvm::getUnderlyingObjectFromInt(const Value *V) {
   do {
     if (const Operator *U = dyn_cast<Operator>(V)) {
       // If we find a ptrtoint, we can transfer control back to the
@@ -90,7 +90,7 @@ static const Value *getUnderlyingObjectFromInt(const Value *V) {
 
 /// getUnderlyingObject - This is a wrapper around GetUnderlyingObject
 /// and adds support for basic ptrtoint+arithmetic+inttoptr sequences.
-static const Value *getUnderlyingObject(const Value *V) {
+const Value *llvm::getUnderlyingObject(const Value *V) {
   // First just call Value::getUnderlyingObject to let it do what it does.
   do {
     V = GetUnderlyingObject(V);
@@ -109,9 +109,9 @@ static const Value *getUnderlyingObject(const Value *V) {
 /// getUnderlyingObjectForInstr - If this machine instr has memory reference
 /// information and it can be tracked to a normal reference to a known
 /// object, return the Value for that object. Otherwise return null.
-static const Value *getUnderlyingObjectForInstr(const MachineInstr *MI,
-                                                const MachineFrameInfo *MFI,
-                                                bool &MayAlias) {
+const Value *llvm::getUnderlyingObjectForInstr(const MachineInstr *MI,
+                                               const MachineFrameInfo *MFI,
+                                               bool &MayAlias) {
   MayAlias = true;
   if (!MI->hasOneMemOperand() ||
       !(*MI->memoperands_begin())->getValue() ||
@@ -484,8 +484,13 @@ void ScheduleDAGInstrs::BuildSchedGraph(AliasAnalysis *AA) {
         std::map<const Value *, SUnit *>::iterator IE = 
           ((MayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
         if (I != IE) {
-          I->second->addPred(SDep(SU, SDep::Order, /*Latency=*/0, /*Reg=*/0,
-                                  /*isNormalMemory=*/true));
+          // XXX
+          // XXX aliasing stores must not be issued in the same cycle (hack
+          // XXX for TMS320C64X).
+          // XXX
+          I->second->addPred(SDep(SU, SDep::Order,
+                                  /*Latency=*/TrueMemOrderLatency,
+                                  /*Reg=*/0, /*isNormalMemory=*/true));
           I->second = SU;
         } else {
           if (MayAlias)

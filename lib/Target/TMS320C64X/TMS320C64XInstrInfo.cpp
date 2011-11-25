@@ -176,6 +176,17 @@ TMS320C64XInstrInfo::CreatePostRAHazardRecognizer(const TargetMachine *TM)
 
 //-----------------------------------------------------------------------------
 
+TMS320C64X::ResourceAssignment*
+TMS320C64XInstrInfo::CreateFunctionalUnitScheduler(const TargetMachine *TM)
+{
+  const TargetInstrInfo *TII = TM->getInstrInfo();
+  assert(TII && "No InstrInfo? Can not create a hazard recognizer!");
+
+  return new TMS320C64X::ResourceAssignment(*TII);
+}
+
+//-----------------------------------------------------------------------------
+
 bool TMS320C64XInstrInfo::getImmPredValue(const MachineInstr &MI) const {
 
   const int predIndex = MI.findFirstPredOperandIdx();
@@ -692,7 +703,7 @@ int TMS320C64XInstrInfo::getSideOpcode(int Opcode, int Side) const {
   assert(desc.TSFlags & TMS320C64XII::is_side_inst);
 
   // is the given Opcode already of the requested side?
-  if ((desc.TSFlags >> TMS320C64XII::side_shift) == (unsigned) Side)
+  if (((desc.TSFlags >> TMS320C64XII::side_shift) & 0x1) == (unsigned) Side)
     return Opcode;
 
   DenseMap<unsigned, unsigned>::const_iterator I = Side2SideMap.find(Opcode);
@@ -701,6 +712,31 @@ int TMS320C64XInstrInfo::getSideOpcode(int Opcode, int Side) const {
     return -1;
   }
   return I->second;
+}
+
+//-----------------------------------------------------------------------------
+
+bool
+TMS320C64XInstrInfo::isFlexible(const TargetInstrDesc &tid) {
+  if ((tid.TSFlags & TMS320C64XII::unit_support_mask) != UNIT_FIXED &&
+      (tid.TSFlags & TMS320C64XII::is_side_inst))
+    return true;
+  else
+    return false;
+}
+
+//-----------------------------------------------------------------------------
+
+bool
+TMS320C64XInstrInfo::isFlexible(const MachineInstr *MI) {
+  return isFlexible(MI->getDesc());
+}
+
+//-----------------------------------------------------------------------------
+
+int TMS320C64XInstrInfo::getSide(const MachineInstr *MI) {
+  using namespace TMS320C64XII;
+  return (MI->getDesc().TSFlags & is_bside) >> side_shift;
 }
 
 //-----------------------------------------------------------------------------

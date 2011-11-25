@@ -17,8 +17,9 @@
 #include "TMS320C64X.h"
 #include "TMS320C64XMachineFunctionInfo.h"
 #include "TMS320C64XInstrInfo.h"
+#include "Scheduling.h"
 #include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/CodeGen/SchedulePostRABase.h"
+#include "llvm/CodeGen/ScheduleInstrsCommon.h"
 #include "llvm/PassManager.h"
 #include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -27,11 +28,17 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetLowering.h"
 
 using namespace llvm;
+
+static cl::opt<bool>
+BundleNoReorder("c64x-bundle-noreorder", cl::Hidden,
+           cl::desc("Don't reorder instructions when creating bundles"),
+           cl::init(false));
 
 //-----------------------------------------------------------------------------
 
@@ -68,10 +75,16 @@ class TMS320C64XScheduler : public MachineFunctionPass {
 };
 
 //-----------------------------------------------------------------------------
+#if 0
+typedef TMS320C64X::SchedulerBase TheBase;
+#else
+typedef ScheduleDAGInstrs TheBase;
+#endif
 
 char TMS320C64XScheduler::ID = 0;
 
-  class CustomListScheduler : public SchedulePostRABase {
+  class CustomListScheduler : public TheBase,
+                              public ScheduleInstrsCommon {
 
     /// HazardRec - The hazard recognizer to use.
     ScheduleHazardRecognizer *HazardRec;
@@ -117,7 +130,8 @@ CustomListScheduler::CustomListScheduler(MachineFunction &MF,
                                   const MachineDominatorTree &MDT,
                                   ScheduleHazardRecognizer *HR,
                                   AliasAnalysis *AA)
-  : SchedulePostRABase(MF, MLI, MDT)
+  : TheBase(MF, MLI, MDT)
+  , ScheduleInstrsCommon(MF)
   , HazardRec(HR)
   , NumCycles(0)
 {}
@@ -159,29 +173,26 @@ static bool isSchedulingBoundary(const MachineInstr *MI,
 
 //-----------------------------------------------------------------------------
 
-/// addTerminatorInstr - Add one pseudo-instruction for every branch terminator
+/// addTerminatorInstr - Add one pseudo-instruction for every branch,
 /// so scheduling can keep track of the branch delays. The last pseudo
 /// instructions marks the actual end of the block schedule (TERM). Returns
 /// true if at least one of those instructions was added.
 
 bool TMS320C64XScheduler::addTerminatorInstr(MachineBasicBlock *MBB) {
-  MachineBasicBlock::iterator I = MBB->getFirstTerminator();
-  if (I == MBB->end())
-    return false;
-
   const TargetInstrInfo *TII = TM.getInstrInfo();
-
   DebugLoc dl;
+  unsigned count = 0;
 
-  while (I != MBB->end()) {
-    BuildMI(*MBB, ++I, dl, TII->get(TMS320C64X::BR_OCCURS));
-    // should now point to the next terminator (branch) or end()
-    assert(I == MBB->end() ||
-           ( I->getOpcode() != TMS320C64X::BR_OCCURS &&
-             I->getDesc().isTerminator()));
+  for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end(); I != E;) {
+    // XXX actually insert the pseudo-instruction after every branch: includes
+    // indirect calls and would also work with side-exit branches.
+    if (I->getDesc().isBranch() || I->getDesc().isReturn()) {
+      BuildMI(*MBB, ++I, dl, TII->get(TMS320C64X::BR_OCCURS));
+      count++;
+    } else
+      ++I;
   }
-  // XXX are we supposed to call updateTerminator?
-  return true;
+  return count > 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -202,7 +213,7 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
 
   unsigned NumCycles = 0;
 
-  SchedulePostRABase *Scheduler =
+  CustomListScheduler *Scheduler =
     new CustomListScheduler(Fn, MLI, MDT, HR, AA);
 
   // Loop over all of the basic blocks
@@ -211,7 +222,8 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
     unsigned BlockCycles = 0;
 
     // do we add a TERM to the end of the block?
-    bool BlockHasTerm = addTerminatorInstr(MBB);
+    addTerminatorInstr(MBB);
+    bool BlockHasTerm = prior(MBB->end())->getOpcode() == TMS320C64X::BR_OCCURS;
 
     // Initialize register live-range state for scheduling in this block.
     Scheduler->StartBlock(MBB);
@@ -273,7 +285,7 @@ bool TMS320C64XScheduler::runOnMachineFunction(MachineFunction &Fn) {
 ///
 void CustomListScheduler::StartBlock(MachineBasicBlock *BB) {
   // Call the superclass.
-  ScheduleDAGInstrs::StartBlock(BB);
+  TheBase::StartBlock(BB);
 
   // Reset the hazard recognizer and anti-dep breaker.
   HazardRec->Reset();
@@ -517,7 +529,7 @@ void CustomListScheduler::ListScheduleBottomUp() {
 
 void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
  // build the graph as always
-  SchedulePostRABase::BuildSchedGraph(AA);
+  TheBase::BuildSchedGraph(AA);
 
   // Enforce strict order on calls and branches. This also connects our 'branch
   // happens' instruction (TERM) to the actual branch instr.
@@ -526,14 +538,14 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
   for (unsigned i = 0, e = SUnits.size(); i != e; ++i) {
     // we rely on the reverse ordering of SUnits
     const TargetInstrDesc &tid = SUnits[i].getInstr()->getDesc();
-    if (tid.isTerminator() || tid.isCall()) {
+    if (tid.isTerminator() || tid.isCall() || tid.isCall()) {
       // found something, add order dep
       if (nextBranch)
         nextBranch->addPred(SDep(&SUnits[i], SDep::Order, SUnits[i].Latency));
       nextBranch = &SUnits[i];
     }
     // all branch-related nodes need to be scheduled when becoming available
-    if (tid.isTerminator())
+    if (tid.isTerminator() || tid.isBranch())
       SUnits[i].isScheduleHigh = true;
 
     // remember when the first branch of the block occurs
@@ -581,6 +593,15 @@ void CustomListScheduler::BuildSchedGraph(AliasAnalysis *AA) {
         lat = std::max(0, lat - 1);
         ExitSU.addPred(SDep(&SUnits[i], SDep::Order, lat));
       }
+    }
+  }
+
+  if (BundleNoReorder) {
+    SUnit *prevSU = NULL;
+    for (unsigned i = 0, e = SUnits.size(); i != e; ++i) {
+      if (prevSU)
+        prevSU->addPred(SDep(&SUnits[i], SDep::Order, 0));
+      prevSU = &SUnits[i];
     }
   }
 }

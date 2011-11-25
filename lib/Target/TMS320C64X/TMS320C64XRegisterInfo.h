@@ -35,41 +35,49 @@ namespace llvm {
 // forwards
 class TargetInstrInfo;
 
-//class TMS320C64XRegisterInfo : TMS320C64XGenRegisterInfo {
 struct TMS320C64XRegisterInfo : TMS320C64XGenRegisterInfo {
 
-    const TargetInstrInfo &TII;
+  const TargetInstrInfo &TII;
 
-    TMS320C64XRegisterInfo(const TargetInstrInfo &tii);
+  TMS320C64XRegisterInfo(const TargetInstrInfo &tii);
 
-    // default class dtor
-    ~TMS320C64XRegisterInfo();
+  // default class dtor
+  ~TMS320C64XRegisterInfo();
 
-    const unsigned int *getCalleeSavedRegs(const MachineFunction *) const;
+  const unsigned int *getCalleeSavedRegs(const MachineFunction *) const;
 
-    const TargetRegisterClass* const *getCalleeSavedRegClasses(
-                                           const MachineFunction *) const;
+  const TargetRegisterClass* const *getCalleeSavedRegClasses(
+    const MachineFunction *) const;
 
-    BitVector getReservedRegs(const MachineFunction &MF) const;
+  BitVector getReservedRegs(const MachineFunction &MF) const;
 
-    unsigned int getSubReg(unsigned int, unsigned int) const;
+  unsigned int getSubReg(unsigned int, unsigned int) const;
 
-    bool requiresRegisterScavenging(const MachineFunction &MF) const;
+  bool requiresRegisterScavenging(const MachineFunction &MF) const;
 
-    // NKIM, has changed for the llvm-versions higher than 2.7
-    virtual void eliminateFrameIndex(MachineBasicBlock::iterator I,
-                                    int SPAdj, RegScavenger *r = 0) const;
+  // NKIM, has changed for the llvm-versions higher than 2.7
+  virtual void eliminateFrameIndex(MachineBasicBlock::iterator I,
+                                   int SPAdj, RegScavenger *r = 0) const;
 
-//  NKIM, moved to FrameLowering class
-//    bool hasFP(const MachineFunction &MF) const;
-//    void emitPrologue(MachineFunction &MF) const;
-//    void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const;
 
-    /* Debug stuff, apparently */
-    unsigned int getRARegister() const;
-    unsigned int getFrameRegister(const MachineFunction &MF) const;
-    int getDwarfRegNum(unsigned RegNum, bool isEH) const;
+  //  NKIM, moved to FrameLowering class
+  //    bool hasFP(const MachineFunction &MF) const;
+  //    void emitPrologue(MachineFunction &MF) const;
+  //    void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const;
+
+  /* Debug stuff, apparently */
+  unsigned int getRARegister() const;
+  unsigned int getFrameRegister(const MachineFunction &MF) const;
+  int getDwarfRegNum(unsigned RegNum, bool isEH) const;
 };
+
+namespace TMS320C64X {
+
+  /// helper that returns the canonical RC for the side of the given RC.
+  /// GPRegs cannot be resolved and will return GPRegs
+  const TargetRegisterClass *resolveSide(const TargetRegisterClass *RC);
+
+} // TMS320C64X namespace
 
 } // llvm namespace
 

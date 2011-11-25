@@ -16,14 +16,17 @@
 #define TMS320C64XHAZARDRECOGNIZER_H
 
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
+#include "llvm/Target/TargetRegisterInfo.h"
 
 #include <string>
+#include <set>
 
 namespace llvm {
 
 class TargetInstrInfo;
 class TargetInstrDesc;
 class MachineInstr;
+class MachineOperand;
 
 namespace TMS320C64X {
 
@@ -38,41 +41,76 @@ enum ExtraRes {
   NumExtra = 5
 };
 
-} // end of namespace TMS320C64X
-
-/// TMS320C64XHazardRecognizer
-
-class TMS320C64XHazardRecognizer : public ScheduleHazardRecognizer {
-
+/// Tracks resource use and schedules functional units
+class ResourceAssignment {
+protected:
   const TargetInstrInfo &TII;
   TMS320C64X::MachineHazards *Hzd;
 
+  void Reset();
+  bool isPseudo(SUnit *SU) const;
   unsigned getUnitIndex(unsigned side, unsigned unit);
   unsigned getUnitIndex(SUnit *SU);
-  bool isPseudo(SUnit *SU) const;
+public:
+  ResourceAssignment(const TargetInstrInfo &TII);
+  virtual ~ResourceAssignment();
+
+  /// Try to schedule SU in the current cycle, return true if successful.
+  /// Note: May change FU operand.
+  bool Schedule(SUnit *SU);
+
+  /// Same as schedule, but try to schedule SU on the given cluster
+  /// (ie. ignore the side encoded in the instruction).
+  bool ScheduleOnSide(SUnit *SU, unsigned side);
+
+  bool ScheduleXCC(unsigned dstSide);
+  bool XPathOnSideAvailable(unsigned dstSide);
+
+  /// End the current cycle.
+  void AdvanceCycle();
+
+  void dbgUnitBusy(SUnit *SU, unsigned idx) const;
+  void dbgExtraBusy(SUnit *SU, unsigned xidx) const;
+
   static bool isFlexibleInstruction(const TargetInstrDesc &tid);
+  static void setXPath(MachineInstr *MI, bool setOrUnset);
+  static unsigned getExtraUse(SUnit *SU);
+  static unsigned getExtraUse(const TargetInstrDesc &desc,
+                              const MachineOperand &op);
+  static std::pair<bool, int> analyzeOpRegs(const MachineInstr *MI);
+  static std::set<const TargetRegisterClass*>
+    getOperandRCs(const MachineInstr *MI);
+  static std::string getExtraStr(unsigned xuse);
+
+private:
+  bool isCopy(SUnit *SU) const;
+};
+
+} // end of namespace TMS320C64X
+
+
+/// Implements hazard recognizer interface, does not schedule FUs.
+class TMS320C64XHazardRecognizer : public ScheduleHazardRecognizer,
+                                   public TMS320C64X::ResourceAssignment {
+
   bool isMove(SUnit *SU) const;
   void fixResources(SUnit *SU);
-  void setXPath(MachineInstr *MI, bool setOrUnset) const;
   void activateExtra(SUnit *SU);
   HazardType getMoveHazard(SUnit *SU) const;
   bool emitMove(SUnit *SU);
 
 public:
-  static unsigned getExtraUse(SUnit *SU);
   static std::pair<unsigned,unsigned> analyzeMove(SUnit *SU);
-  static std::string getExtraStr(unsigned xuse);
-  static std::pair<bool, int> analyzeOpRegs(const MachineInstr *MI);
 
-  TMS320C64XHazardRecognizer(const TargetInstrInfo &TII);
-  ~TMS320C64XHazardRecognizer();
+  TMS320C64XHazardRecognizer(const TargetInstrInfo &TII)
+    : ResourceAssignment(TII)
+  {}
 
   virtual HazardType getHazardType(SUnit *SU, int stalls);
-
   virtual void EmitInstruction(SUnit *SU);
-  virtual void AdvanceCycle();
   virtual void EmitNoop();
-  virtual void Reset();
+  virtual void AdvanceCycle() { ResourceAssignment::AdvanceCycle(); }
+  virtual void Reset() { ResourceAssignment::Reset(); }
 };
 
 } // end namespace llvm
