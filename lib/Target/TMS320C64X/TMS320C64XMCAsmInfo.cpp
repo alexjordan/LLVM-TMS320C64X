@@ -30,16 +30,22 @@ using namespace llvm;
 TMS320C64XMCAsmInfo::TMS320C64XMCAsmInfo(const Target &T, const StringRef &TT) {
 
   GlobalDirective = "\t.global\t";
+
+  Data8bitsDirective = "\t.byte\t";
   Data16bitsDirective = "\t.half\t";
   Data32bitsDirective = "\t.word\t";
   Data64bitsDirective = 0;
-  ZeroDirective = "\t.zero\t";
+
+  // .space or eventually .bes
+  ZeroDirective = "\t.space\t";
+
   AsciiDirective = "\t.string\t";
   AscizDirective = "\t.cstring\t";
   WeakRefDirective = "\t.ref ";
 
   CommentString = ";";
   AllowPeriodsInName = false;
+  AllowQuotesInName = false;
 
   AlignmentIsInBytes = true;
   COMMDirectiveAlignmentIsInBytes = true;
@@ -57,10 +63,14 @@ TMS320C64XMCAsmInfoELF::TMS320C64XMCAsmInfoELF(const Target &T,
 
   // rest same as COFF
   GlobalDirective = "\t.global\t";
+
+  Data8bitsDirective = "\t.byte\t";
   Data16bitsDirective = "\t.half\t";
   Data32bitsDirective = "\t.word\t";
   Data64bitsDirective = 0;
-  ZeroDirective = "\t.zero\t";
+
+  // .space or eventually .bes
+  ZeroDirective = "\t.space\t";
 
   // In TI's assembler, the .string directive does not implicitly 0-terminate
   // the string, but also does not support C escapes (\n, \t, etc.). The latter
@@ -76,6 +86,7 @@ TMS320C64XMCAsmInfoELF::TMS320C64XMCAsmInfoELF(const Target &T,
 
   CommentString = ";";
   AllowPeriodsInName = false;
+  AllowQuotesInName = false;
 
   AlignmentIsInBytes = true;
   COMMDirectiveAlignmentIsInBytes = true;

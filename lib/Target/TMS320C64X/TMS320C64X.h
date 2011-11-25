@@ -31,14 +31,22 @@
 
 namespace llvm {
   class TMS320C64XTargetMachine;
+  class PassRegistry;
   class FunctionPass;
 
-  /// declare methods for the pass-creators here
+  // initialize the if-conversion for the TMS320C64X target
+  void initializeTMS320C64XIfConversionPass(PassRegistry&);
 
   FunctionPass *TMS320C64XCreateInstSelector(TargetMachine &TM);
   FunctionPass *createTMS320C64XClusterAssignment(TargetMachine &tm);
   FunctionPass *createTMS320C64XDelaySlotFillerPass(TargetMachine &tm);
   FunctionPass *createTMS320C64XScheduler(TargetMachine &tm);
+
+  /// createTMS320C64XIfConversionPass - create a pass for converting if/
+  /// else structures for the machine basic blocks for the TMS320C64X target.
+  /// This pass processes machine functions and needs to be run before RA
+  FunctionPass *createTMS320C64XIfConversionPass(TMS320C64XTargetMachine &TM);
+
   extern Target TheTMS320C64XTarget;
 }
 

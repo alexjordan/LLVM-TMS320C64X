@@ -205,6 +205,9 @@ public:
     static int getSide(const MachineInstr *MI);
 
     // defunct. was used with pseudo opcodes.
+    virtual bool PredicateInstruction(MachineInstr *MI,
+                           const SmallVectorImpl<MachineOperand> &pred) const;
+
     int getOpcodeForSide(int Opcode, int Side) const;
 
     // used to map an instruction to its version on the opposite cluster side.
