@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/RegisterScavenging.h"
 
 using namespace llvm;
 
@@ -165,4 +166,21 @@ bool TMS320C64XFrameLowering::hasFP(const MachineFunction &MF) const {
   // However this means extra work and testing, so it's room for expansion
   // and optimisation in the future.
   return true;
+}
+
+void TMS320C64XFrameLowering::
+processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
+                                     RegScavenger *RS) const {
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  const TMS320C64XRegisterInfo *RegInfo =
+    static_cast<const TMS320C64XRegisterInfo*>(MF.getTarget().getRegisterInfo());
+  const TargetRegisterClass *RC = TMS320C64X::GPRegsRegisterClass;
+
+  if (RegInfo->requiresRegisterScavenging(MF)) {
+    // Reserve a slot for emergency spilling.
+    // XXX It is essential that the slot can be addressed with a small offset!
+    RS->setScavengingFrameIndex(MFI->CreateStackObject(RC->getSize(),
+                                                       RC->getAlignment(),
+                                                       false));
+  }
 }

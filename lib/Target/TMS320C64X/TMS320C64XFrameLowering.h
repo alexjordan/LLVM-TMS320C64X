@@ -39,6 +39,9 @@ class TMS320C64XFrameLowering : public TargetFrameLowering {
     void emitPrologue(MachineFunction &MF) const;
     void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const;
     bool hasFP(const MachineFunction &MF) const;
+
+    void processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
+                                              RegScavenger *RS) const;
 };
 
 } // llvm namespace
