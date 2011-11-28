@@ -70,15 +70,9 @@ RunOnSuperblocks("ifconv-superblocks-only",
   cl::desc("Run the if-conversion on machine superblocks only"),
   cl::init(false), cl::Hidden);
 
-static cl::opt<bool>
-RewriteCalls("ifconv-rewrite-calls",
-  cl::desc("Transform calls into predicable branch instructions"),
-  cl::init(false), cl::Hidden);
-
 STATISTIC(NumRemovedBranchesStat, "Number of removed branch instructions");
 STATISTIC(NumPredicatedBlocksStat, "Number of predicated basic blocks");
 STATISTIC(NumDuplicatedBlocksStat, "Number of duplicated basic blocks");
-STATISTIC(NumRewrittenCallsStat, "Number of rewritten call instructions");
 
 //------------------------------------------------------------------------------
 
@@ -298,7 +292,6 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
     unsigned NumRemovedBranches;
     unsigned NumPredicatedBlocks;
     unsigned NumDuplicatedBlocks;
-    unsigned NumRewrittenCalls;
 
   public:
 
@@ -394,8 +387,9 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
 
     // this helper method specifies whether we can skip predication of the
     // specified instruction. For example this is true for llvm-IR pseudo's
-    // such as kill, imp-defs, or for target instrs such as special "labels"
-    bool requiresPredication(const MachineInstr &MI) const;
+    // such as kill, imp-defs, or for target instrs such as special "labels".
+    // Such instructions are left unconsidered for used heuristics
+    bool isPredicatelessPseudoMI(const MachineInstr &MI) const;
 
     // this is another handy helper, which returns a side entry into 'tail',
     // different from specified predecessors 'skipPredA' and 'skipPredB', it
@@ -447,11 +441,6 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
     // the block are removed with exception of the predecessor we explicitly
     // want to keep (skipPred)
     void duplicateBlock(MachineBasicBlock *MBB, MachineBasicBlock *skipPred);
-
-    // experimental feature for rewriting TMS callp instructions into regular
-    // branches (this will eventually increase the predication scope and does
-    // make delay slots of calls explicit)
-    void rewriteCallInstruction(MachineInstr &callMI);
 
     // to simplify the converting process, we eliminate fallthrough's by ma-
     // king each transition explicit via branch instructions. Some of them
@@ -562,21 +551,21 @@ TMS320C64XIfConversion::getCommonSuccessor(MachineBasicBlock &FBB,
 }
 
 //------------------------------------------------------------------------------
-// requiresPredication:
+// isPredicatelessPseudoMI:
 //
 // Returns whenter a given machine instruction can be skipped during predi-
 // cation process. This is true for some llvm-pseudo artifacts such as kill
 // or implicit defs or target pseudos. Note, this actually also includes any
 // IR copies, however we do handle them separately
 
-bool TMS320C64XIfConversion::requiresPredication(const MachineInstr &MI) const
-{
+bool
+TMS320C64XIfConversion::isPredicatelessPseudoMI(const MachineInstr &MI) const {
   switch (MI.getOpcode()) {
     case TargetOpcode::KILL:
     case TargetOpcode::IMPLICIT_DEF:
     case TMS320C64X::call_return_label:
-      return false;
-    default: return true;
+      return true;
+    default: return false;
   }
 }
 
@@ -622,11 +611,6 @@ void TMS320C64XIfConversion::analyzeMachineFunction(MachineFunction &MF) {
     MachineBasicBlock *MBB = &*MBBI;
     assert(MBB && "Bad block detected, something is really fishy here!");
 
-    if (MF.getFunction()->getNameStr() == "main"
-    && MBB->getName() == "do.body.i.i.i.i.i.i") {
-      MBB->dump();
-    }
-
     // do not permit trivial MBB cycles
     if (MBB->isSuccessor(MBB)) continue;
 
@@ -642,38 +626,23 @@ void TMS320C64XIfConversion::analyzeMachineFunction(MachineFunction &MF) {
     MachineBasicBlock::iterator MI;
 
     for (MI = MBB->begin(); MI != MBB->end(); ++MI) {
-      if (MI->isDebugValue() || MI->isPHI()) continue;
-
       // also skip instructions, which can but do not need to be predicated.
       // this includes stuff like kill, implicit-def or target pseudos such
       // as returning pads for indirect jumps. This does not include PHIs or
       // copies, these will require special attention later
-      if (!requiresPredication(*MI)) continue;
+      if (MI->isDebugValue() || isPredicatelessPseudoMI(*MI)) continue;
 
       // handle a copy separately, a copy will probably expand to a target-
       // move later, therefore we consider it for our estimaton heuristic by
       // comparing its execution cycles to a regular physical register move
-      if (MI->getOpcode() == TargetOpcode::COPY) {
+      if (MI->getOpcode() == TargetOpcode::COPY || MI->isPHI()) {
         blockInfo.cycles++;
         continue;
       }
 
-      // we are not able to predicate inline-asm yet...
-      if (MI->isInlineAsm()) {
-        DEBUG(dbgs() << "Can't predicate asm-instruction: " << *MI);
-        blockInfo.predicable = false;
-      }
-
-      const int op = MI->getOpcode();
-
-      // we eventually can accept calls if they are rewrittable, thus we do
-      // distinguish them explicitly from the rest of the instructions
-      if (op == TMS320C64X::callp_global || op == TMS320C64X::callp_extsym) {
-        if (!(RewriteCalls || AggressiveConversion)) {
-          DEBUG(dbgs() << "Can't predicate call-instruction: " << *MI);
-          blockInfo.predicable = false;
-        }
-      } else if (!TII->isPredicable(MI)) {
+      // track any machine instructions that we can not predicate (such as
+      // calls, rets, etc.). NOTE, that this does not include any pseudos
+      if (!TII->isPredicable(MI)) {
         DEBUG(dbgs() << "Can't predicate instruction: " << *MI);
         blockInfo.predicable = false;
       }
@@ -1242,91 +1211,6 @@ std::set<PHIEntryInfo> TMS320C64XIfConversion::updatePHIs(BBInfo &sourceTBB,
 }
 
 //------------------------------------------------------------------------------
-// rewriteCallInstruction:
-//
-// For some experiments i provide a way to morph a subset of call instruc-
-// tions as supported by the current TI-backend into a branching instruction.
-// This has the advantage of the parent block to become predicable eventually,
-// and also makes delay slots explicit which then can be filled by the sched.
-
-void TMS320C64XIfConversion::rewriteCallInstruction(MachineInstr &callMI) {
-
-  const int op = callMI.getOpcode();
-  assert(op == TMS320C64X::callp_global || op == TMS320C64X::callp_extsym);
-
-  MachineBasicBlock &MBB = *callMI.getParent();
-  MachineModuleInfo &MMI = MBB.getParent()->getMMI();
-
-  // destination operand for the call instruction
-  MachineOperand &targetMO = callMI.getOperand(0);
-
-  // generate a unique label for the return from the call, the address of
-  // the label will be put into B3 and supplied to the callee to be able
-  // to return from the subroutine
-  const char *retPad = MMI.getContext().CreateTempSymbol()->getName().data();
-
-  // generate a move instruction for the return label, this is done by
-  // creating a double move (mvkl/mvkh) as usual. Pay attention to define
-  // reg operand properly, since we assume to be dealing with machine SSA!
-  MachineBasicBlock::iterator pos(&callMI);
-
-  // we add a dummy side-specified in order to make the codegen shut up and
-  // stop complaining about number of operand inconsistencies much later...
-  TMS320C64XInstrInfo::addFormOp(TII->addDefaultPred(BuildMI(
-    MBB, pos, DebugLoc(), TII->get(TMS320C64X::mvkl_2)).addReg(TMS320C64X::B3,
-      RegState::Define).addExternalSymbol(retPad)), TMS320C64XII::unit_s, 0);
-
-  // now do the same stuff with the higher portion of the target address
-  TMS320C64XInstrInfo::addFormOp(TII->addDefaultPred(BuildMI(
-    MBB, pos, DebugLoc(), TII->get(TMS320C64X::mvkh_2)).addReg(TMS320C64X::B3,
-      RegState::Define).addExternalSymbol(retPad).addReg(TMS320C64X::B3)),
-        TMS320C64XII::unit_s, 0);
-
-  MachineInstr *branchMI = 0;
-
-  if (targetMO.isGlobal()) {
-    const GlobalValue *GA = targetMO.getGlobal();
-    assert(GA && "Invalid global address for a call detected!");
-
-    // now rewrite the original call into a pseudo "branch" instruction
-    branchMI = TII->addDefaultPred(BuildMI(MBB, ++pos, DebugLoc(),
-      TII->get(TMS320C64X::call_branch)).addGlobalAddress(GA));
-  }
-  else if (targetMO.isSymbol()) {
-    const char *SYM = targetMO.getSymbolName();
-    assert(SYM && "Bad name for an external symbol detected!");
-
-    branchMI = TII->addDefaultPred(BuildMI(MBB, ++pos, DebugLoc(),
-      TII->get(TMS320C64X::call_branch)).addExternalSymbol(SYM));
-  } else llvm_unreachable("Dead code, must not happen at all!");
-
-  // create a label to be loaded into B3 as a return address
-  BuildMI(MBB, pos, DebugLoc(), TII->get(TMS320C64X::call_return_label))
-    .addExternalSymbol(retPad);
-
-  // now to finalize rewriting we need to patch in the call arguments proper-
-  // ly. This is for sure a very ugly way to morph a call into a pseudo branch,
-  // however, it is sufficient for our experiments now and will eventually be
-  // improved later...
-
-  // skip the header of the call instruction, together with the call target
-  // and predication operands (target=0, predImm=1, predReg=2). Since a call
-  // (as a callp instruction) can not be predicated, this can be improved in
-  // the instruction description, TODO, FIXME
-
-  if (callMI.getNumOperands() < 4) return;
-
-  // now simply transfer the current operand...
-  for (unsigned I = 3; I < callMI.getNumOperands(); ++I)
-    branchMI->addOperand(callMI.getOperand(I));
-
-  // last but not least patch in a B3 register operand as a return address-
-  // operand. This has to be done in order to avoid B3 defs being eliminated
-  branchMI->addOperand(MachineOperand::CreateReg(TMS320C64X::B3, false));
-  DEBUG(dbgs() << "Morphed call: " << callMI << " into: " << *branchMI);
-}
-
-//------------------------------------------------------------------------------
 // insertPredCopies:
 //
 // When a tail block has phi-values from two predecessors, we need to handle
@@ -1385,7 +1269,6 @@ void TMS320C64XIfConversion::predicateBlock(BBInfo &blockInfo,
 
   MachineBasicBlock &MBB = *blockInfo.MBB;
   MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  std::list<MachineInstr*> rewrittenCalls;
 
   /// now iterate over all instructions in the block and assign predicates
   /// to them. If we have inserted custom select-pred instructions above, we
@@ -1400,20 +1283,9 @@ void TMS320C64XIfConversion::predicateBlock(BBInfo &blockInfo,
 
     // we also skip any llvm-intermed. pseudos such as for example kill.
     // also skip any pseudo-real machine instructions (such as ret-labels)
-    if (!requiresPredication(*MI) || op == TargetOpcode::COPY) continue;
+    if (isPredicatelessPseudoMI(*MI) || op == TargetOpcode::COPY) continue;
 
     if (MI->getDesc().isConditionalBranch()) continue;
-
-    // now eventually rewrite call instructions if desired, check for consis-
-    // tency for sure, the rewriting is only allowed when desired explicitly,
-    // or via an aggressive if-conversion
-    if (op == TMS320C64X::callp_global || op == TMS320C64X::callp_extsym) {
-      assert((RewriteCalls || AggressiveConversion)
-        && "Inconsistent pattern selection, not rejected yet?");
-      rewriteCallInstruction(*MI);
-      rewrittenCalls.push_back(MI);
-      continue;
-    }
 
     if (TII->isPredicated(MI)) {
       DEBUG(dbgs() << "Predicated MI found: " << *MI << '\n');
@@ -1460,15 +1332,6 @@ void TMS320C64XIfConversion::predicateBlock(BBInfo &blockInfo,
     }
     else if (!TII->PredicateInstruction(&*MI, predicates))
       DEBUG(dbgs() << "Can't predicate instruction: " << *MI);
-  }
-
-  // now if we have rewritten any calls, drop original call-instructions, we
-  // collect them first in a temp-set and drop them after the predication, it
-  // does not look most elegant, but simplifies implementation
-  while (rewrittenCalls.size()) {
-    rewrittenCalls.back()->eraseFromParent();
-    rewrittenCalls.pop_back();
-    NumRewrittenCalls++;
   }
 
   NumPredicatedBlocks++;
@@ -1838,7 +1701,6 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
   NumRemovedBranches = 0;
   NumPredicatedBlocks = 0;
   NumDuplicatedBlocks = 0;
-  NumRewrittenCalls = 0;
 
   if (EstimationType == Dynamic) {
     // for a dynamic profitability estimation we use a profile-information,
@@ -1903,7 +1765,6 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
   NumRemovedBranchesStat += NumRemovedBranches;
   NumPredicatedBlocksStat += NumPredicatedBlocks;
   NumDuplicatedBlocksStat += NumDuplicatedBlocks;
-  NumRewrittenCallsStat += NumRewrittenCalls;
   return NumRemovedBranches || NumDuplicatedBlocks;
 }
   
