@@ -643,7 +643,7 @@ void TMS320C64XIfConversion::analyzeMachineFunction(MachineFunction &MF) {
       // track any machine instructions that we can not predicate (such as
       // calls, rets, etc.). NOTE, that this does not include any pseudos
       if (!TII->isPredicable(MI)) {
-        DEBUG(dbgs() << "Can't predicate instruction: " << *MI);
+        DEBUG(dbgs() << "Analysis: can't predicate instruction " << *MI);
         blockInfo.predicable = false;
       }
 
@@ -1606,12 +1606,6 @@ bool TMS320C64XIfConversion::convertStructure(IfConvertible &candidate) {
 
     if (conv.MBB->pred_size() > 1) {
       if (isProfitableToDuplicate(conv)) {
-
-        if (conv.MBB->getName() == "do.body.i.i.i.i.i.i")
-          conv.MBB->getParent()->viewCFGOnly();
-
-//          dbgs() << "duplicating DO.BODY !!!!\n";
-
         duplicateBlock(conv.MBB, head.MBB);
         return true;
       } else return false;
@@ -1766,5 +1760,4 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
   NumPredicatedBlocksStat += NumPredicatedBlocks;
   NumDuplicatedBlocksStat += NumDuplicatedBlocks;
   return NumRemovedBranches || NumDuplicatedBlocks;
-}
-  
+} 
