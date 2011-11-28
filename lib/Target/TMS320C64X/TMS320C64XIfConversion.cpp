@@ -381,21 +381,16 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
     // the number of its successors/predecessors, etc
     bool isProfitableToDuplicate(BBInfo &MBB) const;
 
-    // returns true, if the specified blocks represent a backedge to the pa-
-    // rent loop. I.e the destination block is a header of a loop containing
-    // the source block. We avoid converting such constellations
-    bool isParentLoopBackedge(BBInfo &src, BBInfo &dst) const;
-
-    // another helper method that tells whether the specified block is mer-
-    // geable in general. I.e. whether its CFG structure (predecessors/suc-
-    // cessors) is suitable, whether it eventually can be duplicated, etc.
-    bool canMergeBlock(BBInfo &MBBInfo) const;
+    // another helper method that tells whether the specified source block
+    // is mergeable into the specified destination block. I.e. whether its
+    // CFG structure (predecessors/successors) is suitable (preds/succs/loop
+    // backedges), whether it eventually can be duplicated, etc.
+    bool canMergeBlock(BBInfo &srcBlockInfo, BBInfo &destBlockInfo) const;
 
     // additionally to 'canMergeBlock' this method checks whether specified
-    // machine basic block can be predicated prior to merging. This assumes
-    // the block have no non-predicable instructions as well a successor num-
-    // ber limited to 1
-    bool canPredicateAndMergeBlock(BBInfo &MBBInfo) const;
+    // machine basic block can be predicated. This check is done for blocks
+    // being candidates for a conversion
+    bool canPredicateBlock(BBInfo &MBBInfo) const;
 
     // this helper method specifies whether we can skip predication of the
     // specified instruction. For example this is true for llvm-IR pseudo's
@@ -583,28 +578,6 @@ bool TMS320C64XIfConversion::requiresPredication(const MachineInstr &MI) const
       return false;
     default: return true;
   }
-}
-
-//------------------------------------------------------------------------------
-// isParentLoopBackedge:
-//
-// Returns true, if the specified blocks represent a backedge to the parent
-// loop. I.e the destination block is a header of a loop containing the source
-// block. This present difficulties and is rarely profitable, thus we avoid
-// converting such structures
-
-bool
-TMS320C64XIfConversion::isParentLoopBackedge(BBInfo &src, BBInfo &dst) const {
-  assert(MLI && "Can't check for backedges without loop-info!");
-  assert(src.MBB && dst.MBB && "Invalid blocks to check for a backedge!");
-
-  if (!MLI->isLoopHeader(dst.MBB)) return false;
-
-  const int dstLoopDepth = MLI->getLoopDepth(dst.MBB);
-  const int srcLoopDepth = MLI->getLoopDepth(src.MBB);
-
-  // strong enough even for nat. loops ?
-  return dstLoopDepth <= srcLoopDepth;
 }
 
 //------------------------------------------------------------------------------
@@ -870,7 +843,8 @@ void TMS320C64XIfConversion::extractIfPattern(BBInfo &head) {
       infoFBB = tmp;
     }
 
-    if (!canPredicateAndMergeBlock(infoFBB) || !canMergeBlock(infoTBB))
+    // FBB is neither predicable nor mergeable, therefore give up...
+    if (!(canPredicateBlock(infoFBB) && canMergeBlock(infoTBB, head)))
       return;
 
     // in case we require a duplication of the convMBB-block, the tail block
@@ -887,10 +861,15 @@ void TMS320C64XIfConversion::extractIfPattern(BBInfo &head) {
     MachineBasicBlock *tailMBB =
       getCommonSuccessor(*infoTBB.MBB, *infoFBB.MBB);
 
-    // tough luck, give it up, crusader...
-    if (!canPredicateAndMergeBlock(infoTBB)
-    && !canPredicateAndMergeBlock(infoFBB)) return;
- 
+    const bool canConvertTBB =
+      canPredicateBlock(infoTBB) && canMergeBlock(infoTBB, head);
+
+    const bool canConvertFBB =
+      canPredicateBlock(infoFBB) && canMergeBlock(infoFBB, head);
+
+    // tough luck, give it up and go home, crusader
+    if (!canConvertTBB && !canConvertFBB) return;
+
     if (!tailMBB) {
       candidateMap.insert(std::make_pair(headCount, 
         IfConvertible(IF_OPEN, head, infoTBB, infoFBB)));
@@ -899,8 +878,7 @@ void TMS320C64XIfConversion::extractIfPattern(BBInfo &head) {
       // since we are going to predicate both blocks, require both of them to
       // be mergeable and predicable. for the time being we only allow simple
       // conversions, collapsing all blocks into the head
-      if (!canPredicateAndMergeBlock(infoTBB)
-      || !canPredicateAndMergeBlock(infoFBB)) return;
+      if (!canConvertTBB || !canConvertFBB) return;
 
       // if there is a common successor-block, we obviously have a diamond
       // here. Converting diamonds is slightly more complicated and conver-
@@ -915,7 +893,9 @@ void TMS320C64XIfConversion::extractIfPattern(BBInfo &head) {
       if (tailMBBI == analyzedBlocks.end()) return;
 
       BBInfo &tail = tailMBBI->second;
-      if (!canMergeBlock(tail)) return;
+
+      // i hope, checking for FBB is sufficient...
+      if (!canMergeBlock(tail, infoFBB)) return;
 
       const unsigned maxNumSideEntries =
         (infoTBB.MBB->pred_size() > 1) + (infoFBB.MBB->pred_size() > 1);
@@ -935,32 +915,44 @@ void TMS320C64XIfConversion::extractIfPattern(BBInfo &head) {
 // canMergeBlock:
 //
 // A simple helper method to determine whether we can generally merge speci-
-// fied block into another one. For this to be true, the block is required
-// to have some basic properties as well as the ability to be eventuall dup-
-// licable
+// fied block (src) into another one (dst). For this to be true, the block is
+// required to have some basic properties as well as the ability to be dupli-
+// cable eventually
 
-bool TMS320C64XIfConversion::canMergeBlock(BBInfo &MBBInfo) const {
+bool
+TMS320C64XIfConversion::canMergeBlock(BBInfo &srcInfo, BBInfo &dstInfo) const {
 
-  if (!MBBInfo.MBB || !MBBInfo.analyzable) return false;
-  if (MBBInfo.MBB->getBasicBlock()->hasAddressTaken()) return false;
+  if (!srcInfo.MBB || !srcInfo.analyzable) return false;
+  if (srcInfo.MBB->getBasicBlock()->hasAddressTaken()) return false;
 
   // in case of side-entries, we eventually can convert the structure by
   // removing them via a tail-duplication. I.e. require MBB to be duplicable
-  if ((MBBInfo.MBB->pred_size() > 1) && !MBBInfo.duplicable) return false;
+  if ((srcInfo.MBB->pred_size() > 1) && !srcInfo.duplicable) return false;
+
+  // additionally we avoid merging parent-loop header blocks into the head,
+  // this complicates matters when it comes to phi-adjustment and is rarely
+  // really profitable, therefore reject such cases
+  assert(MLI && "Can't check for backedges without loop-info!");
+  assert(srcInfo.MBB && dstInfo.MBB && "Invalid backedge blocks!");
+
+  if (MLI->isLoopHeader(srcInfo.MBB)) {
+    // this check is probably sufficient for nat. loops...
+    const int dstLoopDepth = MLI->getLoopDepth(dstInfo.MBB);
+    const int srcLoopDepth = MLI->getLoopDepth(srcInfo.MBB);
+    return srcLoopDepth <= dstLoopDepth;
+  }
   return true;
 }
 
 //------------------------------------------------------------------------------
-// canPredicateAndMergeBlock:
+// canPredicateBlock:
 //
-// Another helper equivalent to 'canMergeBlock'. This one checks additionally
-// to merge-ability, whether we can predicate specified machine basic block
+// Another helper similar to 'canMergeBlock'. This one checks whether we can
+// predicate the given machine basic block
 
-bool TMS320C64XIfConversion::canPredicateAndMergeBlock(BBInfo &MBBInfo) const {
-  // for simplicity we also limit the number of successors for blocks we are
-  // going to predicate prior to merging
-  bool canPredicate = MBBInfo.predicable && MBBInfo.MBB->succ_size() == 1;
-  return canMergeBlock(MBBInfo) && canPredicate;
+bool TMS320C64XIfConversion::canPredicateBlock(BBInfo &MBBInfo) const {
+  // for simplicity we also limit the number of successors...
+  return MBBInfo.predicable && MBBInfo.MBB->succ_size() == 1;
 }
 
 //------------------------------------------------------------------------------
@@ -1116,11 +1108,13 @@ TMS320C64XIfConversion::getConversionPreference(IfConvertible &candidate) {
     // one branch target into the head and append the other to this combo.
     // I use a simple formula here and hope it to be effective...
     if (BRANCH_CYCLES * execFreqFBB > execFreqTBB * infoFBB.cycles)
-      if (canPredicateAndMergeBlock(infoFBB)) return PREFER_FBB;
+      if (canPredicateBlock(infoFBB) && canMergeBlock(infoFBB, headBBI))
+        return PREFER_FBB;
 
     // now try another way around, check whether TBB is profitable
     if (BRANCH_CYCLES * execFreqTBB > execFreqFBB * infoTBB.cycles)
-      if (canPredicateAndMergeBlock(infoTBB)) return PREFER_TBB;
+      if (canPredicateBlock(infoTBB) && canMergeBlock(infoTBB, headBBI))
+        return PREFER_TBB;
   }
   else if (candidate.type == IF_TRIANGLE) {
 
@@ -1424,10 +1418,20 @@ void TMS320C64XIfConversion::predicateBlock(BBInfo &blockInfo,
     if (TII->isPredicated(MI)) {
       DEBUG(dbgs() << "Predicated MI found: " << *MI << '\n');
 
-      // in case we encounter an instruction which is already predicated, we
-      // need to fold both predicates, this will be done by changing the MI
-      // to write to a new register. This new register will then be moved
-      // (conditionally) into the original register
+      /// in case we encounter an instruction which is already predicated, we
+      /// basically need to decide, since we can do two things. We can connect
+      /// involved predicates (already used one and a new one we are going to
+      /// assign) logically by and-/or-ing. This is good when there are few
+      /// large pools of already predicated instructions using different pre-
+      /// dicates, since this increases pressure on predicate-registers. This
+      /// is bad if there are only few of them. Alternatively, you can "rew-
+      /// rite" instructions to write into a new destination register and then
+      /// insert a predicated move which transfers the content into the orig.
+      /// destination. This effectively doubles the number of predicated inst-
+      /// ructions and therefore increases register pressure on the GPR's.
+      /// For the time being we implement the second variant, while still ex-
+      /// perimenting with another alternative, TODO
+
       const int predIndex = MI->findFirstPredOperandIdx();
       assert(predIndex != -1 && "Predicated MI without a predicate!");
 

@@ -410,7 +410,7 @@ bool MachineProfileLoader::runOnMachineFunction(MachineFunction &MF) {
     }
     DEBUG(dbgs() << "Path profile information processed\n");
   }
-// else errs() << "Warning: no path profile information found!\n";
+  else errs() << "Warning: no path profile information found!\n";
   return false;
 }
 

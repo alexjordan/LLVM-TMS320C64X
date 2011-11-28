@@ -122,8 +122,6 @@ namespace llvm {
     }
 
     void setEdgeWeight(Edge e, double w) {
-      dbgs() << "setting edge weights...\n";
-
       DEBUG_WITH_TYPE("profile-info",
             dbgs() << "Creating Edge " << e
                    << " (weight: " << format("%.20g",w) << ")\n");
