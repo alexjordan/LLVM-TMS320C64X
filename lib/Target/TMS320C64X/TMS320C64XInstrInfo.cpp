@@ -702,14 +702,12 @@ bool TMS320C64XInstrInfo::PredicateInstruction(MachineInstr *MI,
     predImmOperand.setImm(pred[0].getImm());
     predRegOperand.setReg(pred[1].getReg());
   }
-/*
   else {
     // if there is no predicate operands being set until now, create and set
     // both of them. NOTE, we are dealing with predicable instructions 
     MI->addOperand(MachineOperand::CreateImm(pred[0].getImm()));
     MI->addOperand(MachineOperand::CreateReg(pred[1].getReg(), false));
   }
-*/
 
   return true;
 }

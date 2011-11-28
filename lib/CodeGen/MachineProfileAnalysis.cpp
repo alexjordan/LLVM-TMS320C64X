@@ -410,7 +410,13 @@ bool MachineProfileLoader::runOnMachineFunction(MachineFunction &MF) {
     }
     DEBUG(dbgs() << "Path profile information processed\n");
   }
-  else errs() << "Warning: no path profile information found!\n";
+  else
+    // since we are aggreggating edge profile and path profile information
+    // in the same loader pass, users may be interested in aquiring edge
+    // profiles only, i.e. having the path profile being empty/invalid. We
+    // only emit a warning for debug purposes and surpress it by default
+    DEBUG(errs() << "Note: no path profile information found/collected!\n");
+
   return false;
 }
 
