@@ -572,17 +572,9 @@ void MachineLICM::HoistRegion(MachineDomTreeNode *N, bool IsHeader) {
          MII = BB->begin(), E = BB->end(); MII != E; ) {
     MachineBasicBlock::iterator NextMII = MII; ++NextMII;
     MachineInstr *MI = &*MII;
-/*
-    dbgs() << "checking instruction: " << *MI;
-    dbgs() << "number of operands: " << MI->getNumOperands() << '\n';
-
-    for (int i = 0; i < MI->getNumOperands(); ++i)
-      dbgs() << "operand " << i << " is: " << MI->getOperand(i) << '\n';
-*/
 
     if (!Hoist(MI, Preheader))
       UpdateRegPressure(MI);
-//    dbgs() << "done\n";
 
     MII = NextMII;
   }
