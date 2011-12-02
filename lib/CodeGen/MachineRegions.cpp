@@ -34,6 +34,17 @@ MachineSingleEntryRegion::MachineSingleEntryRegion(const MachineFunction &F,
 
 //-----------------------------------------------------------------------------
 
+MachineSingleEntryRegion::MachineSingleEntryRegion(const MachineFunction &F,
+                                                   MachineBasicBlock &MBB)
+: parent(&F),
+  entry(&MBB)
+{
+  blocks.push_back(&MBB);
+}
+
+
+//-----------------------------------------------------------------------------
+
 bool MachineSingleEntryRegion::contains(MachineBasicBlock *MBB) const {
   assert(MBB && "Invalid machine basic block specified!");
   return std::find(blocks.begin(), blocks.end(), MBB) != blocks.end();
@@ -213,4 +224,74 @@ void MachineSingleEntryCFGRegion::sort() {
   }
 
   blocks = R;
+}
+
+//-----------------------------------------------------------------------------
+// MachineSingleEntryRegion::InstrIterator
+//-----------------------------------------------------------------------------
+MachineSingleEntryRegion::InstrIterator::InstrIterator(
+                                    MachineSingleEntryRegion *MR,
+                                    MachineSingleEntryRegion::iterator I)
+  : MRI(I),
+    MRBegin(MR->begin()),
+    MREnd(MR->end()) {
+
+  assert(MRBegin != MREnd && "empty region");
+  if (MRI != MREnd) {
+    MBBI = curBlock().begin();
+    assert(MBBI != curBlock().end() && "empty block in region");
+  }
+  // otherwise we are in end-state and leave MBBI at its default
+}
+
+MachineSingleEntryRegion::InstrIterator
+MachineSingleEntryRegion::InstrIterator::operator++() {
+  if (++MBBI == curBlock().end())
+    nextBlock();
+  return *this;
+}
+
+MachineSingleEntryRegion::InstrIterator
+MachineSingleEntryRegion::InstrIterator::operator--() {
+  if (atEnd() || MBBI == curBlock().begin())
+    prevBlock();
+  else
+    --MBBI;
+  return *this;
+}
+
+bool MachineSingleEntryRegion::InstrIterator::atEnd() const {
+  if (MRI == MREnd) {
+    assert(MBBI == MachineBasicBlock::iterator() && "incosistent end state");
+    return true;
+  }
+  return false;
+}
+
+void MachineSingleEntryRegion::InstrIterator::nextBlock() {
+
+  // advance to the next block in the list
+  if (++MRI == MREnd) {
+    // no blocks left, reset instr iterator to initial state
+    MBBI = MachineBasicBlock::iterator();
+  } else {
+    // set instr iterator to begin of next block
+    MBBI = curBlock().begin();
+    assert((MBBI != curBlock().end()) && "unexpected empty MBB in region");
+  }
+}
+
+void MachineSingleEntryRegion::InstrIterator::prevBlock() {
+
+  // back to the previous block in the list
+  if (MRI == MRBegin) {
+    // no blocks left, reset instr iterator to initial state
+    MBBI = MachineBasicBlock::iterator();
+  } else {
+    --MRI;
+    // set instr iterator to begin of next block
+    MBBI = curBlock().end();
+    assert((MBBI != curBlock().begin()) && "unexpected empty MBB in region");
+    --MBBI;
+  }
 }

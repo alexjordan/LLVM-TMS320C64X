@@ -20,6 +20,9 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Debug.h"
 
+//#undef DEBUG
+//#define DEBUG(x) x
+
 using namespace llvm;
 using namespace llvm::TMS320C64X;
 
@@ -384,8 +387,8 @@ unsigned UAS::insertCopy(unsigned reg, unsigned side) {
   MachineBasicBlock *DefMBB = DefMI->getParent();
   DebugLoc dl;
   MachineInstr *MI;
-  // place the copy
-  bool defInDifferentBlock = DefMI->getParent() != BB;
+  // place the copy (may be outside of current region)
+  bool defInDifferentBlock = !isBeingScheduled(DefMI->getParent());
   if (defInDifferentBlock) {
     // different block
     MachineBasicBlock::iterator InsertIt = DefMI;

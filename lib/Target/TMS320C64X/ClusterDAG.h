@@ -30,7 +30,7 @@ namespace TMS320C64X {
   std::pair<int,int> countOperandSides(const MachineInstr *MI,
                                        MachineRegisterInfo &MRI);
 
-  class ClusterDAG : public TMS320C64X::SchedulerBase {
+  class ClusterDAG : public TMS320C64X::RegionScheduler {
   protected:
     ResourceAssignment *FUSched;
     const TargetRegisterInfo *TRI;
@@ -44,7 +44,7 @@ namespace TMS320C64X {
                const MachineDominatorTree &MDT,
                AliasAnalysis *AA,
                AssignmentState *state)
-      : SchedulerBase(MF, MLI, MDT)
+      : RegionScheduler(MF, MLI, MDT)
       , FUSched(NULL)
       , TRI(MF.getTarget().getRegisterInfo())
       , AA(AA)

@@ -17,8 +17,10 @@
 #include "TMS320C64XInstrInfo.h"
 #include "ClusterDAG.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/CodeGen/MachineRegions.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/CodeGen/SuperblockFormation.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -335,6 +337,10 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
   const MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
   AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
 
+  std::set<MachineBasicBlock*> Scheduled;
+
+  MachineSuperBlockMapTy MSBs = SuperblockFormation::getSuperblocks();
+
   AssignmentState State;
   Scheduler = createClusterDAG(Algo, Fn, MLI, MDT, AA, &State);
 
@@ -343,10 +349,24 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
     TMS320C64XInstrInfo::CreateFunctionalUnitScheduler(&TM);
   Scheduler->setFunctionalUnitScheduler(RA);
 
+  // XXX schedule regions first, then other blocks?
+  for (MachineSuperBlockMapTy::iterator MSBI = MSBs.begin(), MSBE = MSBs.end();
+       MSBI != MSBE; ++MSBI) {
+    Scheduled.insert(MSBI->second->begin(), MSBI->second->end());
+    Scheduler->Run(MSBI->second);
+  }
+
   for (MachineFunction::iterator MBB = Fn.begin(), MBBe = Fn.end();
        MBB != MBBe; ++MBB) {
+    // already scheduled as part of a region
+    if (Scheduled.count(MBB) || !MBB->size())
+      continue;
+
+    // XXX handle PHIs
     assignPHIs(&State, MBB);
-    Scheduler->Run(MBB, MBB->getFirstNonPHI(), MBB->end(), MBB->size());
+    // make MBB into a trivial region
+    MachineSingleEntryPathRegion region(Fn, *MBB);
+    Scheduler->Run(&region);
   }
 
   Fn.verifySSA(this, "After Cluster Assignment");

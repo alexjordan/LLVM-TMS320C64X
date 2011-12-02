@@ -169,11 +169,11 @@ public:
 			       bool AllowModify = false) const;
 
     // NKIM, DebugLocation has been added to the parameter list
-    virtual unsigned InsertBranch(MachineBasicBlock &,
-				  MachineBasicBlock *,
-				  MachineBasicBlock *,
-				  const SmallVectorImpl<MachineOperand> &Cond,
-                                  DebugLoc) const;
+    virtual unsigned InsertBranch(MachineBasicBlock &MBB,
+                                  MachineBasicBlock *TBB,
+                                  MachineBasicBlock *FBB,
+                                  const SmallVectorImpl<MachineOperand> &Cond,
+                                  DebugLoc dl) const;
 
     virtual unsigned RemoveBranch(MachineBasicBlock &MBB) const;
 

@@ -22,6 +22,7 @@
 #include <list>
 #include <set>
 #include <algorithm>
+#include <deque>
 
 namespace llvm {
 
@@ -30,11 +31,10 @@ namespace llvm {
 typedef std::list<MachineBasicBlock*> MBBListTy;
 typedef std::list<MachineInstr*> MIListTy;
 
-typedef MIListTy::iterator instr_iterator;
-typedef MIListTy::const_iterator const_instr_iterator;
-
 typedef MBBListTy::iterator exit_iterator;
 typedef MBBListTy::const_iterator const_exit_iterator;
+
+//----------------------------------------------------------------------------
 
 //----------------------------------------------------------------------------
 
@@ -69,6 +69,10 @@ class MachineSingleEntryRegion {
     MachineSingleEntryRegion(const MachineFunction &parentParam,
                              MachineBasicBlock &entryParam,
                              const MBBListTy &blocksParam);
+
+    /// c-tor for a trivial region (consisting of one MBB)
+    MachineSingleEntryRegion(const MachineFunction &parentParam,
+                             MachineBasicBlock &entryParam);
 
     const MachineFunction *getParent() const { return parent; }
     const MachineBasicBlock *getEntry() const { return entry; }
@@ -133,6 +137,61 @@ class MachineSingleEntryRegion {
     /// sor-wise. For CFG-regions containing multiple paths a breadth-first
     /// ordering may be profitable
     virtual void sort() = 0;
+
+
+    /// Iterator for instructions within a region.
+    class InstrIterator
+      : public std::iterator <std::bidirectional_iterator_tag, MachineInstr*,
+                              std::ptrdiff_t, MachineInstr**, MachineInstr*> {
+      MachineSingleEntryRegion::iterator MRI, MRBegin, MREnd;
+      MachineBasicBlock::iterator MBBI;
+
+
+      void nextBlock();
+      void prevBlock();
+      bool atEnd() const;
+      MachineBasicBlock &curBlock() const { return **MRI; }
+    public:
+      /// constructs an iterator that points to begin of block I.
+      /// If I == MR->end(), it is the end-iterator.
+      explicit InstrIterator(MachineSingleEntryRegion *MR,
+                             MachineSingleEntryRegion::iterator I);
+
+      explicit InstrIterator() {}
+
+      InstrIterator operator++();
+      InstrIterator operator--();
+      MachineInstr *operator*() { return MBBI; }
+
+      friend
+      bool operator==(InstrIterator a, InstrIterator b) {
+        return (a.MRI == b.MRI &&
+                a.MBBI == b.MBBI);
+      }
+
+      friend
+      bool operator!=(InstrIterator a, InstrIterator b) { return !(a == b); }
+    };
+
+    typedef InstrIterator instr_iterator;
+    typedef std::reverse_iterator<InstrIterator> instr_reverse_iterator;
+
+    /// "begin" iterator for all instructions within the single entry region.
+    /// The order of instructions iterated depends on the internal sorting of
+    /// blocks within the concrete region.
+    instr_iterator instr_begin() {
+      return instr_iterator(this, blocks.begin()); }
+    /// "end" iterator for all instructions within the single entry region.
+    instr_iterator instr_end() {
+      return instr_iterator(this, blocks.end()); }
+
+    /// we also provide a reverse iterator for instructions.
+    instr_reverse_iterator instr_rbegin() {
+      return instr_reverse_iterator(instr_end());
+    }
+    instr_reverse_iterator instr_rend() {
+      return instr_reverse_iterator(instr_begin());
+    }
 };
 
 //----------------------------------------------------------------------------
@@ -148,6 +207,12 @@ class MachineSingleEntryPathRegion : public MachineSingleEntryRegion {
                                  MachineBasicBlock &entryParam,
                                  const MBBListTy &blocksParam)
     : MachineSingleEntryRegion(parentParam, entryParam, blocksParam)
+    {}
+
+    // trivial region ctor
+    MachineSingleEntryPathRegion(const MachineFunction &parentParam,
+                                 MachineBasicBlock &MBBParam)
+    : MachineSingleEntryRegion(parentParam, MBBParam)
     {}
 
     // in order to make the verification more specific (for paths) we need to
