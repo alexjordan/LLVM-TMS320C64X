@@ -96,6 +96,9 @@ char TMS320C64XScheduler::ID = 0;
     /// are not ready because of their latency.
     std::vector<SUnit*> PendingQueue;
 
+    /// AA - AliasAnalysis for making memory reference queries.
+    AliasAnalysis *AA;
+
     unsigned NumCycles;
 
     void ReleasePred(SUnit *SU, const SDep *PredEdge);
@@ -133,6 +136,7 @@ CustomListScheduler::CustomListScheduler(MachineFunction &MF,
   : TheBase(MF, MLI, MDT)
   , ScheduleInstrsCommon(MF)
   , HazardRec(HR)
+  , AA(AA)
   , NumCycles(0)
 {}
 
@@ -330,7 +334,7 @@ void CustomListScheduler::Schedule() {
     }
   }
 #else
-  BuildSchedGraph(NULL);
+  BuildSchedGraph(AA);
 #endif
 
   DEBUG(dbgs() << "********** List Scheduling **********\n");

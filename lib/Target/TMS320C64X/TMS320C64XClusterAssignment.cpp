@@ -16,6 +16,7 @@
 #include "TMS320C64XClusterAssignment.h"
 #include "TMS320C64XInstrInfo.h"
 #include "ClusterDAG.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -88,6 +89,7 @@ struct DagAssign : public TMS320C64XClusterAssignment {
 
   void getAnalysisUsage(AnalysisUsage &AU) const {
     AU.setPreservesCFG();
+    AU.addRequired<AliasAnalysis>();
     AU.addRequired<MachineDominatorTree>();
     AU.addPreserved<MachineDominatorTree>();
     AU.addRequired<MachineLoopInfo>();
@@ -331,9 +333,10 @@ int BSideAssigner::select(int side, const res_set_t &set) {
 bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
   const MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
   const MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
+  AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
 
   AssignmentState State;
-  Scheduler = createClusterDAG(Algo, Fn, MLI, MDT, &State);
+  Scheduler = createClusterDAG(Algo, Fn, MLI, MDT, AA, &State);
 
   // use the post RA hazard recognizer
   ResourceAssignment *RA =

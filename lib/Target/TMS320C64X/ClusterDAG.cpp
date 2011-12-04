@@ -112,7 +112,7 @@ void UAS::ScheduleNodeTopDown(SUnit *SU, unsigned CurCycle, unsigned side) {
 
 
 void UAS::Schedule() {
-  BuildSchedGraph(NULL);
+  BuildSchedGraph(AA);
 
   DEBUG(dbgs() << "********** UAS Scheduling **********\n");
   DEBUG(for (unsigned su = 0, e = SUnits.size(); su != e; ++su)
@@ -570,15 +570,16 @@ TMS320C64X::countOperandSides(const MachineInstr *MI,
   return std::make_pair(opcntA, opcntB);
 }
 
-ClusterDAG *TMS320C64X::createClusterDAG(AssignmentAlgorithm AA,
+ClusterDAG *TMS320C64X::createClusterDAG(AssignmentAlgorithm Algo,
                                          MachineFunction &MF,
                                          const MachineLoopInfo &MLI,
                                          const MachineDominatorTree &MDT,
+                                         AliasAnalysis *AA,
                                          AssignmentState *state) {
   // everything is UAS right now
-  UAS *uas = new UAS(MF, MLI, MDT, state);
+  UAS *uas = new UAS(MF, MLI, MDT, AA, state);
 
-  switch(AA) {
+  switch(Algo) {
   case ClusterUAS:
     uas->setPriority(UAS::MWP); // default
     break;

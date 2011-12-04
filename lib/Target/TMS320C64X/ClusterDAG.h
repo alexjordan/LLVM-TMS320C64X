@@ -34,6 +34,7 @@ namespace TMS320C64X {
   protected:
     ResourceAssignment *FUSched;
     const TargetRegisterInfo *TRI;
+    AliasAnalysis *AA;
     AssignmentState *CAState;
     std::vector<SUnit*> CopySUs;
 
@@ -41,10 +42,12 @@ namespace TMS320C64X {
     ClusterDAG(MachineFunction &MF,
                const MachineLoopInfo &MLI,
                const MachineDominatorTree &MDT,
+               AliasAnalysis *AA,
                AssignmentState *state)
       : SchedulerBase(MF, MLI, MDT)
       , FUSched(NULL)
       , TRI(MF.getTarget().getRegisterInfo())
+      , AA(AA)
       , CAState(state)
     {}
 
@@ -119,8 +122,9 @@ namespace TMS320C64X {
     const TargetRegisterClass *sideToRC(unsigned side) const;
   public:
     UAS(MachineFunction &MF, const MachineLoopInfo &MLI,
-        const MachineDominatorTree &MDT, AssignmentState *state)
-      : ClusterDAG(MF, MLI, MDT, state)
+        const MachineDominatorTree &MDT, AliasAnalysis *AA,
+        AssignmentState *state)
+      : ClusterDAG(MF, MLI, MDT, AA, state)
       , PF(MWP)
       , RandState(0)
     {}
@@ -134,10 +138,11 @@ namespace TMS320C64X {
   };
 
   /// factory function
-  ClusterDAG *createClusterDAG(AssignmentAlgorithm AA,
+  ClusterDAG *createClusterDAG(AssignmentAlgorithm Algo,
                                MachineFunction &MF,
                                const MachineLoopInfo &MLI,
                                const MachineDominatorTree &MDT,
+                               AliasAnalysis *AA,
                                AssignmentState *state);
 }
 }
