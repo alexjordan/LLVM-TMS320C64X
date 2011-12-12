@@ -29,6 +29,8 @@ namespace TMS320C64X {
                   const MachineDominatorTree &MDT)
       : ScheduleDAGInstrs(MF, MLI, MDT) {}
 
+    virtual unsigned getCycles() const = 0;
+
     virtual void BuildSchedGraph(AliasAnalysis *AA);
 
     // experimental dag builder with generic instr iteration
@@ -51,6 +53,9 @@ namespace TMS320C64X {
                     const MachineLoopInfo &MLI,
                     const MachineDominatorTree &MDT)
       : SchedulerBase(MF, MLI, MDT), MR(0) {}
+
+    // remains public
+    using SchedulerBase::getCycles;
 
     virtual void BuildSchedGraph(AliasAnalysis *AA);
     // returns the entry  block of the region

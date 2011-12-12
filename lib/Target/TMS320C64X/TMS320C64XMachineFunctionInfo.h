@@ -22,15 +22,20 @@ namespace llvm {
 
 class TMS320C64XMachineFunctionInfo : public MachineFunctionInfo {
   DenseMap<const MachineBasicBlock*, unsigned> ScheduledCycles;
+  unsigned ScheduledCyclesPre;
 
 public:
-  TMS320C64XMachineFunctionInfo() {}
+  TMS320C64XMachineFunctionInfo() : ScheduledCyclesPre(0) {}
 
   explicit TMS320C64XMachineFunctionInfo(MachineFunction &MF) {}
 
   unsigned getScheduledCycles(const MachineBasicBlock *BB) const;
   bool hasScheduledCycles(const MachineBasicBlock *BB) const;
   void setScheduledCycles(const MachineBasicBlock *BB, unsigned c);
+
+  // pre-pass per function
+  unsigned getScheduledCyclesPre() const { return ScheduledCyclesPre; }
+  void setScheduledCyclesPre(unsigned c) { ScheduledCyclesPre = c; }
 };
 
 } // End llvm namespace

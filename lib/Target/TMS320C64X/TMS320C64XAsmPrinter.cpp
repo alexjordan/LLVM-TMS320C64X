@@ -123,7 +123,7 @@ class TMS320C64XAsmPrinter : public AsmPrinter {
                                const char *ExtraCode,
                                raw_ostream &outputStream);
 
-    virtual void EmitFunctionBodyStart() {}
+    virtual void EmitFunctionBodyStart();
     virtual void EmitStartOfAsmFile(Module &);
     virtual void EmitEndOfAsmFile(Module &M);
 
@@ -760,6 +760,21 @@ TMS320C64XAsmPrinter::printMBBInfo(const MachineBasicBlock *MBB) {
   raw_svector_ostream OS(str);
 
   OS << "\t; SCHEDULED CYCLES: " << MFI->getScheduledCycles(MBB) << "\n";
+
+  OutStreamer.EmitRawText(OS.str());
+}
+
+//-----------------------------------------------------------------------------
+
+void TMS320C64XAsmPrinter::EmitFunctionBodyStart() {
+
+  const TMS320C64XMachineFunctionInfo *MFI =
+    MF->getInfo<TMS320C64XMachineFunctionInfo>();
+
+  SmallString<128> str;
+  raw_svector_ostream OS(str);
+
+  OS << "\t; PRE-PASS CYCLES: " << MFI->getScheduledCyclesPre() << "\n";
 
   OutStreamer.EmitRawText(OS.str());
 }

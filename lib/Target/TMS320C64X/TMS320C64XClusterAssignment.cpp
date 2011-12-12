@@ -15,7 +15,9 @@
 #define DEBUG_TYPE "cluster-assignment"
 #include "TMS320C64XClusterAssignment.h"
 #include "TMS320C64XInstrInfo.h"
+#include "TMS320C64XMachineFunctionInfo.h"
 #include "ClusterDAG.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/MachineRegions.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -336,8 +338,11 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
   const MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
   const MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
   AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
+  TMS320C64XMachineFunctionInfo *MFI =
+    Fn.getInfo<TMS320C64XMachineFunctionInfo>();
 
   std::set<MachineBasicBlock*> Scheduled;
+  unsigned sumCycles = 0;
 
   MachineSuperBlockMapTy MSBs = SuperblockFormation::getSuperblocks();
 
@@ -354,6 +359,7 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
        MSBI != MSBE; ++MSBI) {
     Scheduled.insert(MSBI->second->begin(), MSBI->second->end());
     Scheduler->Run(MSBI->second);
+    sumCycles += Scheduler->getCycles();
   }
 
   for (MachineFunction::iterator MBB = Fn.begin(), MBBe = Fn.end();
@@ -367,11 +373,14 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
     // make MBB into a trivial region
     MachineSingleEntryPathRegion region(Fn, *MBB);
     Scheduler->Run(&region);
+    sumCycles += Scheduler->getCycles();
   }
 
   Fn.verifySSA(this, "After Cluster Assignment");
   if (DebugFlag && isCurrentDebugType(DEBUG_TYPE))
     Fn.dump();
+
+  MFI->setScheduledCyclesPre(sumCycles);
 
   delete Scheduler;
   delete RA;

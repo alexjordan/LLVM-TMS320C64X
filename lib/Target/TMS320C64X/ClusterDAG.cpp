@@ -248,6 +248,7 @@ void UAS::ScheduleTopDown() {
       ++CurCycle;
     }
   }
+  NumCycles = CurCycle;
 }
 
 bool UAS::neverHazard(SUnit *SU) {

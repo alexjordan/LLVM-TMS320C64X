@@ -91,6 +91,7 @@ namespace TMS320C64X {
 
     PriorityFunction PF;
     unsigned RandState; // for randomized cluster priority
+    unsigned NumCycles;
 
     void ScheduleTopDown();
 
@@ -127,9 +128,11 @@ namespace TMS320C64X {
       : ClusterDAG(MF, MLI, MDT, AA, state)
       , PF(MWP)
       , RandState(0)
+      , NumCycles(0)
     {}
 
     virtual void Schedule();
+    virtual unsigned getCycles() const { return NumCycles; }
 
     void setPriority(PriorityFunction p) { PF = p; }
 
