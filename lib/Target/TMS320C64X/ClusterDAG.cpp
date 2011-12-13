@@ -581,6 +581,7 @@ ClusterDAG *TMS320C64X::createClusterDAG(AssignmentAlgorithm Algo,
 
   switch(Algo) {
   case ClusterUAS:
+  case ClusterUAS_mwp:
     uas->setPriority(UAS::MWP); // default
     break;
   case ClusterUAS_none:
