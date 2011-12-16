@@ -80,8 +80,9 @@ void UAS::ScheduleNodeTopDown(SUnit *SU, unsigned CurCycle, unsigned side) {
     MachineOperand &MO = SU->getInstr()->getOperand(0);
     if (MO.isReg() && MO.isDef()) {
       // need to change the register class
-      MRI.setRegClass(MO.getReg(), sideToRC(side));
-      CAState->addVChange(MO.getReg(), sideToRC(side));
+      const TargetRegisterClass *newRC = getChangedRegRC(MO.getReg(), side);
+      MRI.setRegClass(MO.getReg(), newRC);
+      CAState->addVChange(MO.getReg(), newRC);
     }
     DEBUG(dbgs() << "**** Cluster assignment: ");
     DEBUG(SU->dump(this));
@@ -469,6 +470,7 @@ void UAS::rewriteDefs(SUnit *SU) {
     return;
   }
 
+  // rewrite to ARegs class by default
   MRI.setRegClass(MO.getReg(), ARegsRegisterClass);
   CAState->addVChange(MO.getReg(), ARegsRegisterClass);
 }
@@ -515,6 +517,15 @@ void UAS::rewriteUses(SUnit *SU) {
   }
 }
 
+const TargetRegisterClass*
+UAS::getChangedRegRC(unsigned reg, unsigned side) const {
+  const TargetRegisterClass *RC = MRI.getRegClass(reg);
+  // pred regs need to remain pred regs on the destination side
+  if (RC->hasSuperClass(PredRegsRegisterClass))
+    return side ? BPredRegsRegisterClass : APredRegsRegisterClass;
+  else
+    return sideToRC(side);
+}
 
 ClusterPriority UAS::getClusterPriority(SUnit *SU) {
   MachineInstr *MI = SU->getInstr();

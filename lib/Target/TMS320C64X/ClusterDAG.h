@@ -121,6 +121,8 @@ namespace TMS320C64X {
     unsigned insertCopy(unsigned reg, unsigned side);
     bool supportsXPath(SUnit *SU, unsigned opNum);
     const TargetRegisterClass *sideToRC(unsigned side) const;
+    const TargetRegisterClass *getChangedRegRC(unsigned reg,
+                                               unsigned side) const;
   public:
     UAS(MachineFunction &MF, const MachineLoopInfo &MLI,
         const MachineDominatorTree &MDT, AliasAnalysis *AA,
