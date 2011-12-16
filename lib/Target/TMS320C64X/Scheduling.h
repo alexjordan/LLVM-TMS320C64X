@@ -54,7 +54,7 @@ namespace TMS320C64X {
                     const MachineDominatorTree &MDT)
       : SchedulerBase(MF, MLI, MDT), MR(0) {}
 
-    // remains public
+    // keep method public
     using SchedulerBase::getCycles;
 
     virtual void BuildSchedGraph(AliasAnalysis *AA);

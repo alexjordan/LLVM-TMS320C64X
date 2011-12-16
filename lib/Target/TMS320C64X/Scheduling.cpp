@@ -957,10 +957,12 @@ void TMS320C64X::RegionScheduler::Run(MachineSingleEntryPathRegion *R) {
   begin = R->instr_rbegin();
   end = R->instr_rend();
 
-  dbgs() << "Scheduling region (" << R->size() << " block(s))\n";
-  for (MachineSingleEntryPathRegion::instr_iterator I = R->instr_begin(),
-       E = R->instr_end(); I != E; ++I) {
-    (*I)->dump();
+  if (DebugFlag && isCurrentDebugType(DEBUG_TYPE)) {
+    dbgs() << "Scheduling region (" << R->size() << " block(s))\n";
+    for (MachineSingleEntryPathRegion::instr_iterator I = R->instr_begin(),
+         E = R->instr_end(); I != E; ++I) {
+      (*I)->dump();
+    }
   }
 #if 0
   dbgs() << "Reversed region\n";
