@@ -20,8 +20,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-//#undef DEBUG
-//#define DEBUG(x) x
+#undef DEBUG
+#define DEBUG(x) x
 using namespace llvm;
 using namespace TMS320C64X;
 
@@ -365,7 +365,7 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(AliasAnalysis *AA) {
           ((MayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
         if (I != IE) {
           // XXX
-          // XXX aliasing stores must not be issued in the same cycle (hack
+          // XXX AJO: aliasing stores must not be issued in the same cycle (hack
           // XXX for TMS320C64X).
           // XXX
           I->second->addPred(SDep(SU, SDep::Order,
@@ -459,7 +459,7 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(AliasAnalysis *AA) {
     // from one of those successors! However, this still seems to work this
     // way, so don't touch it.
     if (PreviousBarrier != NULL && SU->Succs.empty()) {
-      PreviousBarrier->addPred(SDep(SU, SDep::Order, /* latency = */ 0));
+      PreviousBarrier->addPred(SDep(SU, SDep::Order, SU->Latency));
     }
   }
 
@@ -493,8 +493,7 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
 
   // Used to order side-effecting instructions within the region (ie. between
   // side exits).
-  // XXX consider rewrite and use of the barrier chain for this
-  SUnit *SideEffectChain = 0;
+  SUnit *CallBranchChain = 0;
 
   // Memory references to specific known memory locations are tracked
   // so that they can be given more precise dependencies. We track
@@ -526,8 +525,8 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
 
   // Model data dependencies between instructions being scheduled and the
   // ExitSU.
-  // AJO: don't bother yet
-  //AddSchedBarrierDeps();
+  // AJO: we don't use the generic AddSchedBarrierDeps(). Since we may have more
+  // than one exit in a DAG, barriers are handled when building the DAG.
 
   // Walk the list of instructions, from bottom moving up.
   // GB: added 1 line
@@ -569,12 +568,12 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
       }
       // keep side-effect instructions from crossing barriers
       // XXX use latency of the branch?
-      if (SideEffectChain)
-        SideEffectChain->addPred(SDep(BarrierSU, SDep::Order, 1));
+      //if (SideEffectChain)
+      //  SideEffectChain->addPred(SDep(BarrierSU, SDep::Order, 1));
       if (PreviousBarrier)
         PreviousBarrier->addPred(SDep(BarrierSU, SDep::Order, 0));
       PreviousBarrier = BarrierSU;
-      SideEffectChain = BarrierSU;
+      //SideEffectChain = BarrierSU;
       continue;
     }
     // Create the SUnit for this MI.
@@ -754,6 +753,12 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
       }
     }
 
+    if (TID.isCall() || TID.isBranch()) {
+      if (CallBranchChain)
+        CallBranchChain->addPred(SDep(SU, SDep::Order, SU->Latency));
+      CallBranchChain = SU;
+    }
+
     // Add chain dependencies.
     // Chain dependencies used to enforce memory order should have
     // latency of 0 (except for true dependency of Store followed by
@@ -786,9 +791,9 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
         BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
       BarrierChain = SU;
 
-      if (SideEffectChain)
-        SideEffectChain->addPred(SDep(SU, SDep::Order, /*Latency=*/1));
-      SideEffectChain = SU;
+      //if (SideEffectChain)
+      //  SideEffectChain->addPred(SDep(SU, SDep::Order, /*Latency=*/1));
+      //SideEffectChain = SU;
 
       // fall-through
     new_alias_chain:
@@ -812,9 +817,9 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
       AliasMemUses.clear();
     } else if (TID.mayStore()) {
 
-      if (SideEffectChain)
-        SideEffectChain->addPred(SDep(SU, SDep::Order, /*Latency=*/1));
-      SideEffectChain = SU;
+      //if (SideEffectChain)
+      //  SideEffectChain->addPred(SDep(SU, SDep::Order, /*Latency=*/1));
+      //SideEffectChain = SU;
 
       bool MayAlias = true;
       TrueMemOrderLatency = STORE_LOAD_LATENCY;
@@ -908,9 +913,9 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
           AliasChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
         if (BarrierChain)
           BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
-        if (SideEffectChain)
-          SideEffectChain->addPred(SDep(SU, SDep::Order, /*Latency=*/1));
-        SideEffectChain = SU;
+        //if (SideEffectChain)
+        //  SideEffectChain->addPred(SDep(SU, SDep::Order, /*Latency=*/1));
+        //SideEffectChain = SU;
 
       }
     }
@@ -921,7 +926,7 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
     // from one of those successors! However, this still seems to work this
     // way, so don't touch it.
     if (PreviousBarrier != NULL && SU->Succs.empty()) {
-      PreviousBarrier->addPred(SDep(SU, SDep::Order, /* latency = */ 0));
+      PreviousBarrier->addPred(SDep(SU, SDep::Order, SU->Latency));
     }
   }
 
@@ -943,6 +948,12 @@ void TMS320C64X::RegionScheduler::BuildSchedGraph(AliasAnalysis *AA) {
   end = MR->instr_rend();
 
   SchedulerBase::BuildSchedGraph(begin, end, AA);
+
+#if 1
+  BB = const_cast<MachineBasicBlock*>(MR->getEntry());
+  viewGraph();
+  BB = NULL;
+#endif
 }
 
 bool RegionScheduler::isBeingScheduled(MachineBasicBlock *MBB) const {
@@ -980,7 +991,7 @@ void TMS320C64X::RegionScheduler::Run(MachineSingleEntryPathRegion *R) {
   Schedule();
 
   DEBUG({
-      dbgs() << "*** Final schedule ***\n";
+      dbgs() << "*** Final schedule (" << getCycles() << " cycle(s)) ***\n";
       dumpSchedule();
       dbgs() << '\n';
     });

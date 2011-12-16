@@ -20,8 +20,8 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Debug.h"
 
-//#undef DEBUG
-//#define DEBUG(x) x
+#undef DEBUG
+#define DEBUG(x) x
 
 using namespace llvm;
 using namespace llvm::TMS320C64X;

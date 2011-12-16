@@ -33,10 +33,25 @@
 #include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
+using namespace llvm::TMS320C64X;
 
 static cl::opt<bool> EnableIfConversion("if-conversion",
   cl::Hidden, cl::desc("Perform an if-conversion for the TMS320C64X target"),
   cl::init(false));
+
+static cl::opt<AssignmentAlgorithm>
+ClusterOpt("c64x-clst",
+  cl::desc("Choose a cluster assignment algorithm"),
+  cl::NotHidden,
+  cl::values(
+    clEnumValN(ClusterNone, "none", "Do not assign clusters"),
+    clEnumValN(ClusterB, "bside", "Assign everything to cluster B"),
+    clEnumValN(ClusterUAS, "uas", "Unified assign and schedule"),
+    clEnumValN(ClusterUAS_none, "uas-none", "UAS (no priority: A before B)"),
+    clEnumValN(ClusterUAS_rand, "uas-rand", "UAS (random cluster priority)"),
+    clEnumValN(ClusterUAS_mwp, "uas-mwp", "UAS (magnitude weighted pred)"),
+    clEnumValEnd),
+  cl::init(ClusterNone));
 
 //-----------------------------------------------------------------------------
 
@@ -87,8 +102,22 @@ bool TMS320C64XTargetMachine::addInstSelector(PassManagerBase &PM,
 bool TMS320C64XTargetMachine::addPreRegAlloc(PassManagerBase &PM,
                                              CodeGenOpt::Level)
 {
-  if (Subtarget.enableClusterAssignment())
-    PM.add(createTMS320C64XClusterAssignment(*this));
+  bool wantScheduleForm;
+  switch (ClusterOpt) {
+  default: wantScheduleForm = false; break;
+  case ClusterUAS:
+  case ClusterUAS_none:
+  case ClusterUAS_rand:
+  case ClusterUAS_mwp:
+           wantScheduleForm = true;
+           break;
+  }
+
+  if (Subtarget.enableClusterAssignment()) {
+    if (wantScheduleForm) PM.add(createTMS320C64XBranchDelayExpander(*this));
+    PM.add(createTMS320C64XClusterAssignment(*this, ClusterOpt));
+    if (wantScheduleForm) PM.add(createTMS320C64XBranchDelayReducer(*this));
+  }
   return false;
 }
 

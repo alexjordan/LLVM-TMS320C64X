@@ -107,20 +107,6 @@ struct DagAssign : public TMS320C64XClusterAssignment {
 };
 }
 
-static cl::opt<AssignmentAlgorithm>
-ClusterOpt("c64x-clst",
-  cl::desc("Choose a cluster assignment algorithm"),
-  cl::NotHidden,
-  cl::values(
-    clEnumValN(ClusterNone, "none", "Do not assign clusters"),
-    clEnumValN(ClusterB, "bside", "Assign everything to cluster B"),
-    clEnumValN(ClusterUAS, "uas", "Unified assign and schedule"),
-    clEnumValN(ClusterUAS_none, "uas-none", "UAS (no priority: A before B)"),
-    clEnumValN(ClusterUAS_rand, "uas-rand", "UAS (random cluster priority)"),
-    clEnumValN(ClusterUAS_mwp, "uas-mwp", "UAS (magnitude weighted pred)"),
-    clEnumValEnd),
-  cl::init(ClusterNone));
-
 //
 // TMS320C64XClusterAssignment implementation
 //
@@ -518,8 +504,10 @@ const TargetRegisterClass *AssignmentState::getVChange(unsigned reg) const {
   return VirtMap[reg];
 }
 
-FunctionPass *llvm::createTMS320C64XClusterAssignment(TargetMachine &tm) {
-  switch (ClusterOpt) {
+FunctionPass *llvm::createTMS320C64XClusterAssignment(
+                            TargetMachine &tm,
+                            TMS320C64X::AssignmentAlgorithm alg) {
+  switch (alg) {
   default: llvm_unreachable("unknown cluster assignment");
   case ClusterNone: return new NoAssign(tm);
   case ClusterB:    return new BSideAssigner(tm);
@@ -527,7 +515,7 @@ FunctionPass *llvm::createTMS320C64XClusterAssignment(TargetMachine &tm) {
   case ClusterUAS_none:
   case ClusterUAS_rand:
   case ClusterUAS_mwp:
-                    return new DagAssign(tm, ClusterOpt);
+                    return new DagAssign(tm, alg);
   }
 }
 

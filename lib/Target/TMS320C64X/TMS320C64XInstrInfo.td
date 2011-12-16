@@ -119,8 +119,18 @@ def tmsselect : SDNode<"TMSISD::SELECT", SDT_tmsselect>;
 def Wrapper : SDNode<"TMSISD::WRAPPER", SDT_Wrapper>;
 
 def BUNDLE_END : pseudoinst<(outs), (ins), "${:comment} BUNDLE_END", []>;
+
+def BR_PREPARE : pseudoinst<(outs), (ins), "${:comment} branch prepare", []> {
+  // We store the opcode and operands of the original branch instructions in the
+  // prepare operands, so we need to be considered variadic.
+  let InOperandList = (ins variable_ops);
+  let isPredicable = 0;
+  let isBranch = 1;
+  let Itinerary = Branch;
+}
 def BR_OCCURS : pseudoinst<(outs), (ins), "${:comment} branch occurs", []> {
   let isTerminator = 1;
+  let isBarrier = 1;
 }
 
 // XXX These should probably be marked as for codegen modelling only.
