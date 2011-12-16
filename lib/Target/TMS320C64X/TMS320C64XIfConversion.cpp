@@ -1832,8 +1832,6 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
       if (convertStructure(J->second)) {
         DEBUG(dbgs() << "Converted:\n"; printCandidate(J->second));
         conversionDone = true;
-
-//        ++convcount;
         break;
       }
     }

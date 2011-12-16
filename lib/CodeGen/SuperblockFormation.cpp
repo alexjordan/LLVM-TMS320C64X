@@ -28,11 +28,17 @@ using namespace llvm;
 
 STATISTIC(NumSuperBlocksStat, "Number of superblocks created");
 STATISTIC(NumDuplicatedBlocksStat, "Number of duplicated basic blocks");
+STATISTIC(NumMergedFallthroughsStat, "Number of eliminated fallthroughs");
 
 static cl::opt<unsigned>
 ExecThresh("exec-freq-thresh",
   cl::desc("Profile info execution threshold for superblocks"),
   cl::init(1), cl::Hidden);
+
+static cl::opt<bool>
+DisableFallthroughElimination("disable-fallthrough-elimination",
+  cl::desc("Merge fallthrough basic blocks into predecessor"),
+  cl::init(false), cl::Hidden);
 
 //----------------------------------------------------------------------------
 
@@ -226,6 +232,109 @@ void SuperblockFormation::eliminateSideEntries(const MBBListTy &SB) {
 
 //----------------------------------------------------------------------------
 
+static void printList(MBBListTy &SB) {
+  for (MBBListTy::iterator I = SB.begin(); I != SB.end(); ++I) {
+    dbgs() << "    " << (*I)->getName() << '\n';
+  }
+}
+
+//----------------------------------------------------------------------------
+
+void SuperblockFormation::eliminateFallthroughs(MBBListTy &SB) {
+
+  // NOTE, we only check for fallthroughs from UNTERMINATED blocks, i.e. blocks
+  // that are terminated by a conditional branch with a fallthrough on a false-
+  // condition are not yet considered !
+
+  for (MBBListTy::iterator SI = SB.begin(); SI != SB.end(); ++SI) {
+
+    MachineBasicBlock *MBB = *SI;
+
+    while(1) {
+      // check whether the current block has only one successor, resp. whether
+      // there is a fallthrough transition from the source block into the
+      // destination block
+      if (MBB->succ_size() != 1) break;
+
+//      if (!MBB->size()) dbgs() << "Empty block detected: " << MBB->getName() << '\n';
+
+      if (MBB->size() && MBB->back().getDesc().isBranch()) break;
+
+      // obtain the successor block, there is only one
+      MachineBasicBlock *succ = *(MBB->succ_begin());
+
+      // handle a special case, a successor of the very last block is outside
+      // of the superblock and can therefore have more than one predecessor
+      if (MBB == SB.back() && succ->pred_size() != 1) break;
+
+      assert(succ->pred_size() == 1 && "Inconsistent single-entry region!");
+
+//      if ()
+//      assert(*(succ->pred_begin()) == MBB && "Faulty succ/pred relation!");
+
+      // avoid cycles and backedges to the head block
+      if (MBB == succ || succ == SB.front()) break;
+
+      DEBUG(dbgs() << "merging: " << succ->getName() << " into " <<
+            MBB->getName() << '\n');
+
+//      dbgs() << "=============================== MBB ========================\n";
+//      MBB->dump();
+//      dbgs() << "=============================== succ ========================\n";
+//      succ->dump();
+
+//      dbgs() << "list BEFORE MERGING:\n";
+//      printList(SB);
+//      MBB->getParent()->viewCFGOnly();
+
+//      MBB->removeSuccessor(succ);
+//      MBB->transferSuccessorsAndUpdatePHIs(succ);
+//      dbgs() << "successors transfered!";
+//      MBB->getParent()->viewCFGOnly();
+
+
+      while (succ->size()) {
+        MachineBasicBlock::iterator MI = succ->front();
+        // when we encounter a PHI here, it must be trivial and needs to be
+        // converted to a COPY (it can't point to MBB once inside MBB).
+        if (MI->isPHI()) {
+          assert(MI->getNumOperands() == 3 && "non-trivial PHI within region");
+          MI->setDesc(TII->get(TargetOpcode::COPY));
+          MI->RemoveOperand(2);
+        }
+        // swap instructions now from 'succ' into 'MBB'
+        MBB->push_back(succ->remove(MI));
+      }
+
+//      dbgs() << "=============================== MBB after merging ========================\n";
+//      MBB->dump();
+
+//      dbgs() << "terminator updated!";
+//      MBB->getParent()->viewCFGOnly();
+
+      MBB->removeSuccessor(succ);
+      MBB->transferSuccessorsAndUpdatePHIs(succ);
+      MBB->updateTerminator();
+
+      // drop from the list of blocks for the superblock
+      if (MBB != SB.back()) {
+        MBBListTy::iterator succPos = SI; ++succPos;
+        SB.erase(succPos);
+      }
+
+//      dbgs() << "merging done!\n";
+//      dbgs() << "list AFTER MERGING:\n";
+//      printList(SB);
+//      MBB->getParent()->viewCFGOnly();
+
+      succ->eraseFromParent();
+      ++NumMergedFallthroughsStat;
+    }
+  }
+}
+
+//----------------------------------------------------------------------------
+
 void SuperblockFormation::processTrace(const MachineProfilePathBlockList &PP,
                                        const unsigned count)
 {
@@ -262,6 +371,16 @@ void SuperblockFormation::processTrace(const MachineProfilePathBlockList &PP,
     if (SB.size() > 1) {
       eliminateSideEntries(SB);
 
+      // eliminate fallthrough-transitions if desired, however, after collap-
+      // sing blocks, the size of the superblock may shrink down to 1. I do
+      // not consider such blocks as regions and will drop from the SB list...
+      if (!DisableFallthroughElimination) eliminateFallthroughs(SB);
+    }
+
+    if (SB.size() > 1) {
+
+      DEBUG(dbgs() << "Cleaned superblock:\n"; printList(SB));
+
       MachineSuperBlock *superblock =
         new MachineSuperBlock(*(SB.front()->getParent()), *SB.front(), SB);
 
@@ -287,6 +406,7 @@ bool SuperblockFormation::runOnMachineFunction(MachineFunction &MF) {
 
   NumSuperBlocks = 0;
   NumDuplicatedBlocks = 0;
+  NumMergedFallthroughsStat = 0;
 
   MachineProfileAnalysis *builder =
     getAnalysisIfAvailable<MachineProfileAnalysis>();
@@ -316,7 +436,9 @@ bool SuperblockFormation::runOnMachineFunction(MachineFunction &MF) {
 
   NumSuperBlocksStat += NumSuperBlocks;
   NumDuplicatedBlocksStat += NumDuplicatedBlocks;
+  NumMergedFallthroughsStat += NumMergedFallthroughs;
 
+  // not necessary
   if (NumDuplicatedBlocks) {
     MDT->runOnMachineFunction(MF);
     MLI->runOnMachineFunction(MF);
