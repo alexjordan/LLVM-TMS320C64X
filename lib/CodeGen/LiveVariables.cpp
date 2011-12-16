@@ -125,8 +125,17 @@ void LiveVariables::MarkVirtRegAliveInBlock(VarInfo &VRInfo,
   }
 }
 
-void LiveVariables::HandleVirtRegUse(unsigned reg, MachineBasicBlock *MBB,
-                                     MachineInstr *MI) {
+void LiveVariables::HandleVirtRegUse(unsigned reg,
+                                     MachineBasicBlock *MBB,
+                                     MachineInstr *MI)
+{
+  if (!MRI->getVRegDef(reg)) {
+    dbgs() << "Using undefined register: " << reg << "\n";
+    dbgs() << "Instruction: " << *MI;
+//    MBB->getParent()->dump();
+    dbgs() << "Parent block: " << MBB->getName() << '\n';
+  }
+
   assert(MRI->getVRegDef(reg) && "Register use before def!");
 
   unsigned BBNum = MBB->getNumber();

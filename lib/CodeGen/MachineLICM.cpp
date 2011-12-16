@@ -354,6 +354,7 @@ void MachineLICM::ProcessMI(MachineInstr *MI,
   bool RuledOut = false;
   bool HasNonInvariantUse = false;
   unsigned Def = 0;
+
   for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
     const MachineOperand &MO = MI->getOperand(i);
     if (MO.isFI()) {

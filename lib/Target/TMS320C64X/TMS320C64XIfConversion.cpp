@@ -38,31 +38,19 @@
 
 using namespace llvm;
 
-namespace llvm {
-  enum ProfitEstimationType { Dynamic, Static };
-}
-
-static cl::opt<llvm::ProfitEstimationType>
-EstimationType("ifconv-estimation", cl::Hidden,
-  cl::desc("Choose how to perform if-conversion profitability estimation"),
-  cl::init(Dynamic), cl::values(
-    clEnumValN(Dynamic, "profile", "Estimate by inspecting profile info"),
-    clEnumValN(Static, "static", "Inspect structure, estimate statically"), 
-    clEnumValEnd));
-
-static cl::opt<unsigned>
-ExecThresh("ifconv-exec-thresh",
-  cl::desc("Execution threshold for if-conversion candidate-blocks"),
-  cl::init(5), cl::Hidden);
-
 static cl::opt<double>
 ConversionLimit("ifconv-func-limit",
   cl::desc("Restrict percentage of if-conversions for each function"),
-  cl::init(0.25), cl::Hidden);
+  cl::init(0.4), cl::Hidden);
 
 static cl::opt<bool>
 AggressiveConversion("ifconv-aggressive",
   cl::desc("Convert aggressively as much convertibles as possible"),
+  cl::init(false), cl::Hidden);
+
+static cl::opt<bool>
+FastEstimation("ifconv-fast-estimation", 
+  cl::desc("Use fast if-conversion profitability estimation"),
   cl::init(false), cl::Hidden);
 
 static cl::opt<bool>
@@ -77,6 +65,10 @@ STATISTIC(NumDuplicatedBlocksStat, "Number of duplicated basic blocks");
 //------------------------------------------------------------------------------
 
 namespace {
+
+typedef std::pair<unsigned, unsigned> UIntPair;
+typedef std::pair<unsigned, UIntPair> PHIEntryInfo;
+typedef SmallVector<MachineOperand, 4> SmallPredVector;
 
 // @enum CONVERSION_PREFERENCE: This enum is provided to improve readability
 // of the code and is used to specify the preference for the conversion, i.e.
@@ -191,6 +183,7 @@ struct BBInfo {
 
   MachineBasicBlock *branchTBB;
   MachineBasicBlock *branchFBB;
+
   SmallVector<MachineOperand, 4> branchCond;
 
   /// METHODS/ACCESSORS
@@ -253,11 +246,6 @@ struct IfConvertible {
 
 //------------------------------------------------------------------------------
 
-typedef std::pair<unsigned, std::pair<unsigned, unsigned> > PHIEntryInfo;
-typedef SmallVector<MachineOperand, 4> SmallPredVectorTy;
-
-//------------------------------------------------------------------------------
-
 // @class TMS320C64XIfConversion - Class for the profile-guided if-conversion
 // pass for machine functions. Contains all the heavy machinery to extract,
 // select, estimate and convert special if-patterns. Designed to be run on
@@ -304,11 +292,14 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
     TMS320C64XIfConversion(TMS320C64XTargetMachine &tm);
     ~TMS320C64XIfConversion() {}
 
-    // Require profile information for dynamic estimations only. Static esti-
-    // mation is implemented to use the machine loop information instead
+    // Require profile information. This currently also includes an estima-
+    // tor in case a real info is not available. Additonally require loop
+    // information for checks during pattern selection
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+      if (!FastEstimation)
+        AU.addRequired<MachineProfileAnalysis>();
+
       AU.addRequired<MachineLoopInfo>();
-      AU.addRequired<MachineProfileAnalysis>();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
@@ -411,7 +402,7 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
     // within the tail block without violating SSA properties of the code
     void insertPredCopies(BBInfo &BB,
                           std::set<PHIEntryInfo> &deadPhis,
-                          SmallPredVectorTy &predicates);
+                          SmallPredVector &predicates);
 
     // during the merge of basic blocks, some funny side-effects can arise.
     // This includes unconditional branches being predicated and yet not
@@ -422,14 +413,14 @@ class TMS320C64XIfConversion : public MachineFunctionPass {
     // is predicating a conditional two-way branch, resulting in a three-way
     // branch now...fun.
     void patchTerminators(BBInfo &head, BBInfo &succ,
-                          SmallPredVectorTy &P,
+                          SmallPredVector &predicates,
                           bool insertBranch = true);
 
     // given a list of predicates (we can only assign one predicate each ite-
     // ration for the time being), each instruction within specified block is
     // predicated. Already predicated instructions will be handled by folding
     // predicates/rewriting destinations
-    void predicateBlock(BBInfo &MBB, SmallPredVectorTy &P);
+    void predicateBlock(BBInfo &MBB, SmallPredVector &predicates);
 
     // this method merges the tail block into the specified head-block. The
     // terminator of the head is dropped, all instructions within the tail
@@ -479,6 +470,7 @@ llvm::createTMS320C64XIfConversionPass(TMS320C64XTargetMachine &tm) {
 
 TMS320C64XIfConversion::TMS320C64XIfConversion()
 : MachineFunctionPass(ID),
+  MPI(0),
   TII(0),
   IID(0),
   BRANCH_CYCLES(5)
@@ -490,6 +482,7 @@ TMS320C64XIfConversion::TMS320C64XIfConversion()
 
 TMS320C64XIfConversion::TMS320C64XIfConversion(TMS320C64XTargetMachine &TM)
 : MachineFunctionPass(ID),
+  MPI(0),
   TII(TM.getInstrInfo()),
   IID(TM.getInstrItineraryData()),
   BRANCH_CYCLES(5)
@@ -614,18 +607,17 @@ void TMS320C64XIfConversion::analyzeMachineFunction(MachineFunction &MF) {
     // do not permit trivial MBB cycles
     if (MBB->isSuccessor(MBB)) continue;
 
-    if (EstimationType == Dynamic)
-      if (MPI && MPI->getExecutionCount(MBB) < ExecThresh) continue;
-
     // this check is provided to skip "dead" blocks which do not seem to have
     // any predecessors and are not the entry blocks for the machine function
     if (MBBI->getBasicBlock() != &(MF.getFunction()->getEntryBlock()))
       if (!MBB->pred_size()) continue;
 
     BBInfo blockInfo(MBB);
+    SmallSet<UIntPair, 8> usedPreds;
     MachineBasicBlock::iterator MI;
 
     for (MI = MBB->begin(); MI != MBB->end(); ++MI) {
+
       // also skip instructions, which can but do not need to be predicated.
       // this includes stuff like kill, implicit-def or target pseudos such
       // as returning pads for indirect jumps. This does not include PHIs or
@@ -653,15 +645,28 @@ void TMS320C64XIfConversion::analyzeMachineFunction(MachineFunction &MF) {
       // once. NOTE, the TMS-target uses predication for conditional jumps.
       // Thus, we do not consider any terminators and record non-terminators
       // only
-      if (TII->isPredicated(MI)) {
-        if (!MID.isConditionalBranch()) blockInfo.predicated = true;
+      if (TII->isPredicated(MI) && !MID.isConditionalBranch()) {
 
-        // when folding predicates we require a destination of each instruc-
-        // tion to be a register, this of course doesn't apply to mem-stores.
-        // This means, we can not further predicate an already predicated
-        // store-instruction yet
-        if (MID.mayStore()) blockInfo.predicable = false;
+        blockInfo.predicated = true;
+        const int predIndex = MI->findFirstPredOperandIdx();
+        assert(predIndex != -1 && "Predicated MI without a predicate!");
+
+        MachineOperand &predImmMO = MI->getOperand(predIndex);
+        MachineOperand &predRegMO = MI->getOperand(predIndex + 1);
+
+        // aquire predicate register and predicate val for the instruction
+        assert(predRegMO.isReg() && predImmMO.isImm() && "Bad predicates!");
+        const unsigned pReg = predRegMO.getReg();
+        const unsigned pImm = predImmMO.getImm();
+
+        // save the set of (different) predicates already used by this bb,
+        // this is useful in order to help control the register pressure
+        if (!usedPreds.count(UIntPair(pReg, pImm)) && usedPreds.size() < 4)
+          usedPreds.insert(UIntPair(pReg, pImm));
       }
+
+      // limit the number of used predicates in a basic block
+      if (usedPreds.size() > 3) blockInfo.predicable = false;
 
       if (MID.hasUnmodeledSideEffects() || MID.isNotDuplicable())
         blockInfo.duplicable = false;
@@ -908,7 +913,7 @@ TMS320C64XIfConversion::canMergeBlock(BBInfo &srcInfo, BBInfo &dstInfo) const {
     // this check is probably sufficient for nat. loops...
     const int dstLoopDepth = MLI->getLoopDepth(dstInfo.MBB);
     const int srcLoopDepth = MLI->getLoopDepth(srcInfo.MBB);
-    return srcLoopDepth <= dstLoopDepth;
+    return srcLoopDepth < dstLoopDepth;
   }
   return true;
 }
@@ -973,7 +978,8 @@ bool TMS320C64XIfConversion::isProfitableToDuplicate(BBInfo &blockInfo) const {
   if (!blockInfo.duplicable) return false;
 
   // avoid inserting too many additional branches
-  if (blockInfo.MBB->succ_size() > 4) return false;
+  if (blockInfo.MBB->succ_size() > 8) return false;
+  if (blockInfo.MBB->pred_size() > 8) return false;
 
   // avoid duplicating really big blocks
   if (blockInfo.size > 64) return false;
@@ -1034,11 +1040,10 @@ TMS320C64XIfConversion::getConversionPreference(IfConvertible &candidate) {
   double execFreqTBB = 0.0;
   double execFreqHead = 0.0;
 
-  // for a static estimation we only require the machine-loop-analysis to be
+  // for a fast estimation we only require the machine-loop-analysis to be
   // present. We inspect the program structure and decide upon block proper-
   // ties such as being a loop header, nesting level, etc.
-  if (EstimationType == Static) {
-    if (!MLI) return PREFER_NONE;
+  if (FastEstimation) {
 
     MachineBasicBlock *FBB = infoFBB.MBB;
     MachineBasicBlock *TBB = infoTBB.MBB;
@@ -1064,49 +1069,69 @@ TMS320C64XIfConversion::getConversionPreference(IfConvertible &candidate) {
     // for a profile based estimation, we use basic block counts for now, but
     // will probably change later to use profiled weights for edges between
     // machine basic blocks
-    if (!MPI) return PREFER_NONE;
-
     execFreqFBB = MPI->getExecutionCount(infoFBB.MBB);
     execFreqTBB = MPI->getExecutionCount(infoTBB.MBB);
     execFreqHead = MPI->getExecutionCount(headBBI.MBB);
   }
 
-  if (candidate.type == IF_OPEN) {
+  unsigned sizeLimit = AggressiveConversion ? 128 : 64;
 
+  if (candidate.type == IF_OPEN) {
+/*
+    dbgs() << "=========================================================\n";
+    dbgs() << "Weight of '" << headBBI.MBB->getName() << "': "
+           << execFreqHead << '\n';
+
+    dbgs() << "Weight of '" << infoFBB.MBB->getName() << "': "
+           << execFreqFBB << '\n';
+
+    dbgs() << "Weight of '" << infoTBB.MBB->getName() << "': "
+           << execFreqTBB << '\n';
+
+    dbgs() << "FBB-cycles: " << (int) infoFBB.cycles << '\n';
+    dbgs() << "TBB-cycles: " << (int) infoTBB.cycles << '\n';
+    dbgs() << "=========================================================\n";
+*/
     // estimating open patterns is rather simple, since we can only merge
     // one branch target into the head and append the other to this combo.
     // I use a simple formula here and hope it to be effective...
-    if (BRANCH_CYCLES * execFreqFBB > execFreqTBB * infoFBB.cycles)
-      if (canPredicateBlock(infoFBB) && canMergeBlock(infoFBB, headBBI))
-        return PREFER_FBB;
+    if (headBBI.size + infoFBB.size <= sizeLimit)
+      if (BRANCH_CYCLES * execFreqFBB > execFreqTBB * infoFBB.cycles)
+        if (canPredicateBlock(infoFBB) && canMergeBlock(infoFBB, headBBI))
+          return PREFER_FBB;
 
     // now try another way around, check whether TBB is profitable
-    if (BRANCH_CYCLES * execFreqTBB > execFreqFBB * infoTBB.cycles)
-      if (canPredicateBlock(infoTBB) && canMergeBlock(infoTBB, headBBI))
-        return PREFER_TBB;
+    if (headBBI.size + infoTBB.size <= sizeLimit)
+      if (BRANCH_CYCLES * execFreqTBB > execFreqFBB * infoTBB.cycles)
+        if (canPredicateBlock(infoTBB) && canMergeBlock(infoTBB, headBBI))
+          return PREFER_TBB;
   }
   else if (candidate.type == IF_TRIANGLE) {
 
     // estimating triangles is a slightly different story, for now we only
     // consider opportunities where we can merge both blocks (FBB and tail
     // into the head). NOTE, we always refer the tail block as TBB here !
-    unsigned cycleLimit = infoFBB.cycles;
-    if (EstimationType == Static) cycleLimit /= 2.0;
+    const unsigned cycleLimit = infoFBB.cycles / AggressiveConversion + 1;
 
-    // more restrictive for dynamic estimations, static estimations usually
-    // seem to profit from less tight bounds (obtained experimentally...)
-    if (execFreqHead * BRANCH_CYCLES > execFreqTBB * cycleLimit)
-      return PREFER_ALL;
+    // more restrictive for non-fast estimations, fast estimations usually
+    // seem to profit from less tight bounds (obtained experimentally...),
+    // these ones however don't
+    if (headBBI.size + infoFBB.size + infoTBB.size <= sizeLimit)
+      if (execFreqHead * BRANCH_CYCLES > execFreqTBB * cycleLimit)
+        return PREFER_ALL;
   }
   else if (candidate.type == IF_DIAMOND) {
 
     // diamonds are rarely being really profitable. To simplify matters, we
     // only consider diamond-structures which either can completely be col-
     // lapsed into a single block, or disrupted by splitting the tail block
-    const double penalty = execFreqTBB * infoFBB.cycles +
-                           execFreqFBB * infoTBB.cycles;
+    const unsigned cycleLimit = (execFreqTBB * infoFBB.cycles +
+                 execFreqFBB * infoTBB.cycles) / AggressiveConversion + 1;
 
-    if (execFreqHead * BRANCH_CYCLES > penalty / 1.5) return PREFER_ALL;
+    // attempt to control register pressure a poor man's way...
+    if (headBBI.size + infoFBB.size + infoTBB.size <= sizeLimit)
+      if (execFreqHead * BRANCH_CYCLES > cycleLimit)
+        return PREFER_ALL;
   }
   return PREFER_NONE;
 }
@@ -1221,7 +1246,7 @@ std::set<PHIEntryInfo> TMS320C64XIfConversion::updatePHIs(BBInfo &sourceTBB,
 
 void TMS320C64XIfConversion::insertPredCopies(BBInfo &blockInfo,
                                               std::set<PHIEntryInfo> &deadPhis,
-                                              SmallPredVectorTy &predicates)
+                                              SmallPredVector &predicates)
 {
   MachineBasicBlock *MBB = blockInfo.MBB;
   assert(blockInfo.MBB && "Can not insert copies, bad basic block!");
@@ -1262,13 +1287,14 @@ void TMS320C64XIfConversion::insertPredCopies(BBInfo &blockInfo,
 // branch, i.e. we may need to pay attention to the following fallthrough...
 
 void TMS320C64XIfConversion::predicateBlock(BBInfo &blockInfo,
-                                            SmallPredVectorTy &predicates)
+                                            SmallPredVector &predicates)
 {
   assert(blockInfo.MBB && "Can not if-convert, bad basic block found!");
   DEBUG(dbgs() << "Predicating block: " << blockInfo.MBB->getName() << '\n');
 
   MachineBasicBlock &MBB = *blockInfo.MBB;
   MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
+  DenseMap<UIntPair, UIntPair> handledPreds;
 
   /// now iterate over all instructions in the block and assign predicates
   /// to them. If we have inserted custom select-pred instructions above, we
@@ -1285,7 +1311,7 @@ void TMS320C64XIfConversion::predicateBlock(BBInfo &blockInfo,
     // also skip any pseudo-real machine instructions (such as ret-labels)
     if (isPredicatelessPseudoMI(*MI) || op == TargetOpcode::COPY) continue;
 
-    if (MI->getDesc().isConditionalBranch()) continue;
+    assert(!MI->getDesc().isConditionalBranch() && "Save my nerves please");
 
     if (TII->isPredicated(MI)) {
       DEBUG(dbgs() << "Predicated MI found: " << *MI << '\n');
@@ -1301,34 +1327,105 @@ void TMS320C64XIfConversion::predicateBlock(BBInfo &blockInfo,
       /// insert a predicated move which transfers the content into the orig.
       /// destination. This effectively doubles the number of predicated inst-
       /// ructions and therefore increases register pressure on the GPR's.
-      /// For the time being we implement the second variant, while still ex-
-      /// perimenting with another alternative, TODO
+      /// For the time being we implement the first variant, which seem to
+      /// make more sense for common cases. In order to avoid predicate re-
+      /// gister pressure explosion, we limit the number of predicates used
+      /// in a block to 3
 
       const int predIndex = MI->findFirstPredOperandIdx();
       assert(predIndex != -1 && "Predicated MI without a predicate!");
 
-      // used predicate must not interfere with the predicate which we have
-      // assigned to the block
-      MachineOperand &predRegMO = MI->getOperand(predIndex + 1);
-      assert(predRegMO.getReg() != predicates[1].getReg());
+      MachineOperand &usedPredImmMO = MI->getOperand(predIndex);
+      MachineOperand &usedPredRegMO = MI->getOperand(predIndex + 1);
+      assert(usedPredRegMO.getReg() != predicates[1].getReg());
 
-      // create a new virtual register as a destination for the instruction
-      // and rewrite the instruction, save the old register for later
-      MachineOperand &destRegMO = MI->getOperand(0);
-      assert(destRegMO.isReg() && "Cant find a destination register!");
+      // get predicate register and predicate value
+      const unsigned miPredReg = usedPredRegMO.getReg();
+      const unsigned miPredImm = usedPredImmMO.getImm();
 
-      const unsigned oldDestReg = destRegMO.getReg();
-      const TargetRegisterClass *RC = MRI.getRegClass(oldDestReg);
-      unsigned newDestReg = MRI.createVirtualRegister(RC);
-      destRegMO.setReg(newDestReg);
+      DenseMap<UIntPair, UIntPair>::iterator PI =
+        handledPreds.find(UIntPair(miPredReg, miPredImm));
 
-      // now insert a copy instruction which simply copies the newly created
-      // destination register into the old one
-      MachineBasicBlock::iterator insertPos = MI;
-      MachineInstr *predMoveMI = BuildMI(MBB, ++insertPos, DebugLoc(),
-        TII->get(TargetOpcode::COPY), oldDestReg).addReg(newDestReg);
+      if (PI == handledPreds.end()) {
 
-      DEBUG(dbgs() << "Folded predicate MI: " << *predMoveMI);
+        // if predicate is not yet handled, we need to do it now and to fold
+        // both source predicates properly. Additionally the folded predicate
+        // will be saved
+
+        MachineBasicBlock::iterator insertPos = MI;
+        const unsigned newPredImm = predicates[0].getImm();
+        const unsigned newPredReg = predicates[1].getReg();
+
+        const TargetRegisterClass *RC = MRI.getRegClass(miPredReg);
+        const unsigned foldedPredReg = MRI.createVirtualRegister(RC);
+        unsigned foldedPredVal = 1;
+
+        if (miPredImm && newPredImm) {
+
+          // if both immediates are positive, use an AND to fold them, this
+          // folded predicate itself needs to stay unpredicated and will be
+          // used as a new predication operand for the instruction
+          MachineInstr *andMI = TII->addDefaultPred(BuildMI(MBB, MI,
+            DebugLoc(), TII->get(TMS320C64X::and_p_rr), foldedPredReg)
+              .addReg(miPredReg).addReg(newPredReg));
+
+          DEBUG(dbgs() << "AND-folded predicate: " << *andMI);
+        }
+        else if (!(miPredImm || newPredImm)) {
+
+          // if in contrast  both immediates are negative, use a NOR to fold
+          // both. There is no native NOR for the TMS target, we therefore
+          // can emit a NOT-OR chain, but even this is not necessary. We can
+          // flip the pred value itself and fold by OR
+          MachineInstr *orMI = TII->addDefaultPred(BuildMI(MBB, MI,
+            DebugLoc(), TII->get(TMS320C64X::or_p_rr), foldedPredReg)
+              .addReg(miPredReg).addReg(newPredReg));
+
+          foldedPredVal = 0;
+
+          DEBUG(dbgs() << "NOR-folded predicate: " << *orMI);
+        }
+        else if (miPredImm && !newPredImm) {
+
+          // if only one of the source preds is negative, we can use the TMS
+          // native ANDN instruction which ands a first source with an inver-
+          // sion of a second source
+          MachineInstr *andnMI = TMS320C64XInstrInfo::addFormOp(
+            TII->addDefaultPred(BuildMI(MBB, MI, DebugLoc(),
+              TII->get(TMS320C64X::andn_rr_1), foldedPredReg)
+                .addReg(miPredReg).addReg(newPredReg)),
+                   TMS320C64XII::unit_s, false);
+
+          DEBUG(dbgs() << "ANDN-folded predicate: " << *andnMI);
+        }
+        else if (!miPredImm && newPredImm) {
+          // similar to the case above, just use a andn instruction
+          MachineInstr *andnMI = TMS320C64XInstrInfo::addFormOp(
+            TII->addDefaultPred(BuildMI(MBB, MI, DebugLoc(),
+              TII->get(TMS320C64X::andn_rr_1), foldedPredReg)
+                .addReg(newPredReg).addReg(miPredReg)),
+                   TMS320C64XII::unit_s, false);
+
+          DEBUG(dbgs() << "ANDN-folded predicate: " << *andnMI);
+        }
+
+        // path predicate operands of the instruction now, NOTE, that the
+        // predicate folding instruction (and, nor, andn) itself goes unpre-
+        // dicated and the imm value for the predicate is always 1!
+        usedPredRegMO.setReg(foldedPredReg);
+        usedPredImmMO.setImm(foldedPredVal);
+
+        // save newly folded pred register/value
+        handledPreds.insert(std::make_pair(
+          UIntPair(miPredReg, miPredImm),
+          UIntPair(foldedPredReg, foldedPredVal)));
+      }
+      else {
+        // if we have folded both source predicates already for an earlier
+        // instruction, then, simply get and use it now
+        usedPredRegMO.setReg(PI->second.first);
+        usedPredImmMO.setImm(PI->second.second);
+      }
     }
     else if (!TII->PredicateInstruction(&*MI, predicates))
       DEBUG(dbgs() << "Can't predicate instruction: " << *MI);
@@ -1442,7 +1539,7 @@ void TMS320C64XIfConversion::mergeBlocks(BBInfo &head, BBInfo &tail) {
 
 void TMS320C64XIfConversion::patchTerminators(BBInfo &infoMBB,
                                               BBInfo &infoSucc,
-                                              SmallPredVectorTy &predicates,
+                                              SmallPredVector &predicates,
                                               bool insertExplicitBranch)
 {
   MachineBasicBlock *MBB = infoMBB.MBB;
@@ -1578,7 +1675,7 @@ bool TMS320C64XIfConversion::convertStructure(IfConvertible &candidate) {
     mergeBlocks(head, convFBB);
     mergeBlocks(head, tail);
     head.MBB->updateTerminator();
-    return false;
+    return true;
   }
   else if (candidate.type == IF_OPEN) {
 
@@ -1641,7 +1738,7 @@ bool TMS320C64XIfConversion::convertStructure(IfConvertible &candidate) {
 
     assert(tail.MBB->pred_size() <= 3 && "Too many preds for the tail!");
 
-    // we eventually will hav to duplicate the conv and the tail block, we do
+    // we eventually will have to duplicate the conv and the tail block, we do
     // it atomically for efficiency. NOTE, that duplicating 'conv' will indu-
     // ce an additional side-entry into the tail !
     if (conv.MBB->pred_size() > 1 && tail.MBB->pred_size () < 3) {
@@ -1696,16 +1793,9 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
   NumPredicatedBlocks = 0;
   NumDuplicatedBlocks = 0;
 
-  if (EstimationType == Dynamic) {
-    // for a dynamic profitability estimation we use a profile-information,
-    // therefore we assume the information to be available, if none is
-    // we give up and do not convert anything
-    MPI = getAnalysisIfAvailable<MachineProfileAnalysis>();
-    if (!MPI || !MPI->getExecutionCount(&MF)) return false;
-  }
+  if (!FastEstimation) MPI = &getAnalysis<MachineProfileAnalysis>();
 
-  MLI = getAnalysisIfAvailable<MachineLoopInfo>();
-  if (!MLI) return false;
+  MLI = &getAnalysis<MachineLoopInfo>();
 
   DEBUG(dbgs() << "Run 'TMS320C64XIfConversion' pass for '"
                << MF.getFunction()->getNameStr() << "'\n");
@@ -1742,6 +1832,8 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
       if (convertStructure(J->second)) {
         DEBUG(dbgs() << "Converted:\n"; printCandidate(J->second));
         conversionDone = true;
+
+//        ++convcount;
         break;
       }
     }
@@ -1761,3 +1853,6 @@ bool TMS320C64XIfConversion::runOnMachineFunction(MachineFunction &MF) {
   NumDuplicatedBlocksStat += NumDuplicatedBlocks;
   return NumRemovedBranches || NumDuplicatedBlocks;
 } 
+
+#undef DEBUG_TYPE
+

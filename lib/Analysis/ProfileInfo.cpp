@@ -34,27 +34,17 @@ INITIALIZE_ANALYSIS_GROUP(ProfileInfo, "Profile Information", NoProfileInfo)
 namespace llvm {
 
 template <>
-ProfileInfoT<MachineFunction, MachineBasicBlock>::ProfileInfoT() {}
-template <>
-ProfileInfoT<MachineFunction, MachineBasicBlock>::~ProfileInfoT() {}
+ProfileInfoT<Function, BasicBlock>::ProfileInfoT() {}
 
 template <>
-ProfileInfoT<Function, BasicBlock>::ProfileInfoT() {
-  MachineProfile = 0;
-}
-template <>
-ProfileInfoT<Function, BasicBlock>::~ProfileInfoT() {
-  if (MachineProfile) delete MachineProfile;
-}
-
-template<>
-char ProfileInfoT<MachineFunction, MachineBasicBlock>::ID = 0;
+ProfileInfoT<Function, BasicBlock>::~ProfileInfoT() {}
 
 template<>
 const double ProfileInfoT<Function,BasicBlock>::MissingValue = -1;
 
-template<> const
-double ProfileInfoT<MachineFunction, MachineBasicBlock>::MissingValue = -1;
+//-----------------------------------------------------------------------------
+// getExecutionCount<BasicBlock>:
+// @brief Return execution count for the given basic block
 
 template<> double
 ProfileInfoT<Function,BasicBlock>::getExecutionCount(const BasicBlock *BB) {
@@ -120,22 +110,13 @@ ProfileInfoT<Function,BasicBlock>::getExecutionCount(const BasicBlock *BB) {
   return Count;
 }
 
-template<>
-double ProfileInfoT<MachineFunction, MachineBasicBlock>::
-        getExecutionCount(const MachineBasicBlock *MBB) {
-  std::map<const MachineFunction*, BlockCounts>::iterator J =
-    BlockInformation.find(MBB->getParent());
-  if (J != BlockInformation.end()) {
-    BlockCounts::iterator I = J->second.find(MBB);
-    if (I != J->second.end())
-      return I->second;
-  }
+//-----------------------------------------------------------------------------
+// getExecutionCount<Function>:
+// @brief Return execution count for the given Function
 
-  return MissingValue;
-}
+template<> double
+ProfileInfoT<Function,BasicBlock>::getExecutionCount(const Function *F) {
 
-template<>
-double ProfileInfoT<Function,BasicBlock>::getExecutionCount(const Function *F) {
   std::map<const Function*, double>::iterator J =
     FunctionInformation.find(F);
   if (J != FunctionInformation.end())
@@ -150,88 +131,9 @@ double ProfileInfoT<Function,BasicBlock>::getExecutionCount(const Function *F) {
   return Count;
 }
 
-template<>
-double ProfileInfoT<MachineFunction, MachineBasicBlock>::
-        getExecutionCount(const MachineFunction *MF) {
-  std::map<const MachineFunction*, double>::iterator J =
-    FunctionInformation.find(MF);
-  if (J != FunctionInformation.end())
-    return J->second;
-
-  double Count = getExecutionCount(&MF->front());
-  if (Count != MissingValue) FunctionInformation[MF] = Count;
-  return Count;
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::
-        setExecutionCount(const BasicBlock *BB, double w) {
-  DEBUG(dbgs() << "Creating Block " << BB->getName() 
-               << " (weight: " << format("%.20g",w) << ")\n");
-  BlockInformation[BB->getParent()][BB] = w;
-}
-
-template<>
-void ProfileInfoT<MachineFunction, MachineBasicBlock>::
-        setExecutionCount(const MachineBasicBlock *MBB, double w) {
-  DEBUG(dbgs() << "Creating Block " << MBB->getBasicBlock()->getName()
-               << " (weight: " << format("%.20g",w) << ")\n");
-  BlockInformation[MBB->getParent()][MBB] = w;
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::addEdgeWeight(Edge e, double w) {
-  double oldw = getEdgeWeight(e);
-  assert (oldw != MissingValue && "Adding weight to Edge with no previous weight");
-  DEBUG(dbgs() << "Adding to Edge " << e
-               << " (new weight: " << format("%.20g",oldw + w) << ")\n");
-  EdgeInformation[getFunction(e)][e] = oldw + w;
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::
-        addExecutionCount(const BasicBlock *BB, double w) {
-  double oldw = getExecutionCount(BB);
-  assert (oldw != MissingValue && "Adding weight to Block with no previous weight");
-  DEBUG(dbgs() << "Adding to Block " << BB->getName()
-               << " (new weight: " << format("%.20g",oldw + w) << ")\n");
-  BlockInformation[BB->getParent()][BB] = oldw + w;
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::removeBlock(const BasicBlock *BB) {
-  std::map<const Function*, BlockCounts>::iterator J =
-    BlockInformation.find(BB->getParent());
-  if (J == BlockInformation.end()) return;
-
-  DEBUG(dbgs() << "Deleting " << BB->getName() << "\n");
-  J->second.erase(BB);
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::removeEdge(Edge e) {
-  std::map<const Function*, EdgeWeights>::iterator J =
-    EdgeInformation.find(getFunction(e));
-  if (J == EdgeInformation.end()) return;
-
-  DEBUG(dbgs() << "Deleting" << e << "\n");
-  J->second.erase(e);
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::
-        replaceEdge(const Edge &oldedge, const Edge &newedge) {
-  double w;
-  if ((w = getEdgeWeight(newedge)) == MissingValue) {
-    w = getEdgeWeight(oldedge);
-    DEBUG(dbgs() << "Replacing " << oldedge << " with " << newedge  << "\n");
-  } else {
-    w += getEdgeWeight(oldedge);
-    DEBUG(dbgs() << "Adding " << oldedge << " to " << newedge  << "\n");
-  }
-  setEdgeWeight(newedge,w);
-  removeEdge(oldedge);
-}
+//-----------------------------------------------------------------------------
+// getPath<Function, BasicBlock>:
+// @brief Calculate and return a path between specified basic blocks
 
 template<>
 const BasicBlock *ProfileInfoT<Function,BasicBlock>::
@@ -277,91 +179,11 @@ const BasicBlock *ProfileInfoT<Function,BasicBlock>::
   return BB;
 }
 
-template<>
-void ProfileInfoT<Function,BasicBlock>::
-        divertFlow(const Edge &oldedge, const Edge &newedge) {
-  DEBUG(dbgs() << "Diverting " << oldedge << " via " << newedge );
-
-  // First check if the old edge was taken, if not, just delete it...
-  if (getEdgeWeight(oldedge) == 0) {
-    removeEdge(oldedge);
-    return;
-  }
-
-  Path P;
-  P[newedge.first] = 0;
-  P[newedge.second] = newedge.first;
-  const BasicBlock *BB = GetPath(newedge.second,oldedge.second,P,GetPathToExit | GetPathToDest);
-
-  double w = getEdgeWeight (oldedge);
-  DEBUG(dbgs() << ", Weight: " << format("%.20g",w) << "\n");
-  do {
-    const BasicBlock *Parent = P.find(BB)->second;
-    Edge e = getEdge(Parent,BB);
-    double oldw = getEdgeWeight(e);
-    double oldc = getExecutionCount(e.first);
-    setEdgeWeight(e, w+oldw);
-    if (Parent != oldedge.first) {
-      setExecutionCount(e.first, w+oldc);
-    }
-    BB = Parent;
-  } while (BB != newedge.first);
-  removeEdge(oldedge);
-}
-
-/// Replaces all occurences of RmBB in the ProfilingInfo with DestBB.
-/// This checks all edges of the function the blocks reside in and replaces the
-/// occurences of RmBB with DestBB.
-template<>
-void ProfileInfoT<Function,BasicBlock>::
-        replaceAllUses(const BasicBlock *RmBB, const BasicBlock *DestBB) {
-  DEBUG(dbgs() << "Replacing " << RmBB->getName()
-               << " with " << DestBB->getName() << "\n");
-  const Function *F = DestBB->getParent();
-  std::map<const Function*, EdgeWeights>::iterator J =
-    EdgeInformation.find(F);
-  if (J == EdgeInformation.end()) return;
-
-  Edge e, newedge;
-  bool erasededge = false;
-  EdgeWeights::iterator I = J->second.begin(), E = J->second.end();
-  while(I != E) {
-    e = (I++)->first;
-    bool foundedge = false; bool eraseedge = false;
-    if (e.first == RmBB) {
-      if (e.second == DestBB) {
-        eraseedge = true;
-      } else {
-        newedge = getEdge(DestBB, e.second);
-        foundedge = true;
-      }
-    }
-    if (e.second == RmBB) {
-      if (e.first == DestBB) {
-        eraseedge = true;
-      } else {
-        newedge = getEdge(e.first, DestBB);
-        foundedge = true;
-      }
-    }
-    if (foundedge) {
-      replaceEdge(e, newedge);
-    }
-    if (eraseedge) {
-      if (erasededge) {
-        Edge newedge = getEdge(DestBB, DestBB);
-        replaceEdge(e, newedge);
-      } else {
-        removeEdge(e);
-        erasededge = true;
-      }
-    }
-  }
-}
-
+//-----------------------------------------------------------------------------
 /// Splits an edge in the ProfileInfo and redirects flow over NewBB.
 /// Since its possible that there is more than one edge in the CFG from FristBB
 /// to SecondBB its necessary to redirect the flow proporionally.
+
 template<>
 void ProfileInfoT<Function,BasicBlock>::splitEdge(const BasicBlock *FirstBB,
                                                   const BasicBlock *SecondBB,
@@ -406,87 +228,6 @@ void ProfileInfoT<Function,BasicBlock>::splitEdge(const BasicBlock *FirstBB,
   } else {
     ECs[e] -= neww;
   }
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::splitBlock(const BasicBlock *Old,
-                                                   const BasicBlock* New) {
-  const Function *F = Old->getParent();
-  std::map<const Function*, EdgeWeights>::iterator J =
-    EdgeInformation.find(F);
-  if (J == EdgeInformation.end()) return;
-
-  DEBUG(dbgs() << "Splitting " << Old->getName() << " to " << New->getName() << "\n");
-
-  std::set<Edge> Edges;
-  for (EdgeWeights::iterator ewi = J->second.begin(), ewe = J->second.end(); 
-       ewi != ewe; ++ewi) {
-    Edge old = ewi->first;
-    if (old.first == Old) {
-      Edges.insert(old);
-    }
-  }
-  for (std::set<Edge>::iterator EI = Edges.begin(), EE = Edges.end(); 
-       EI != EE; ++EI) {
-    Edge newedge = getEdge(New, EI->second);
-    replaceEdge(*EI, newedge);
-  }
-
-  double w = getExecutionCount(Old);
-  setEdgeWeight(getEdge(Old, New), w);
-  setExecutionCount(New, w);
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::splitBlock(const BasicBlock *BB,
-                                                   const BasicBlock* NewBB,
-                                                   BasicBlock *const *Preds,
-                                                   unsigned NumPreds) {
-  const Function *F = BB->getParent();
-  std::map<const Function*, EdgeWeights>::iterator J =
-    EdgeInformation.find(F);
-  if (J == EdgeInformation.end()) return;
-
-  DEBUG(dbgs() << "Splitting " << NumPreds << " Edges from " << BB->getName() 
-               << " to " << NewBB->getName() << "\n");
-
-  // Collect weight that was redirected over NewBB.
-  double newweight = 0;
-  
-  std::set<const BasicBlock *> ProcessedPreds;
-  // For all requestes Predecessors.
-  for (unsigned pred = 0; pred < NumPreds; ++pred) {
-    const BasicBlock * Pred = Preds[pred];
-    if (ProcessedPreds.insert(Pred).second) {
-      // Create edges and read old weight.
-      Edge oldedge = getEdge(Pred, BB);
-      Edge newedge = getEdge(Pred, NewBB);
-
-      // Remember how much weight was redirected.
-      newweight += getEdgeWeight(oldedge);
-    
-      replaceEdge(oldedge,newedge);
-    }
-  }
-
-  Edge newedge = getEdge(NewBB,BB);
-  setEdgeWeight(newedge, newweight);
-  setExecutionCount(NewBB, newweight);
-}
-
-template<>
-void ProfileInfoT<Function,BasicBlock>::transfer(const Function *Old,
-                                                 const Function *New) {
-  DEBUG(dbgs() << "Replacing Function " << Old->getName() << " with "
-               << New->getName() << "\n");
-  std::map<const Function*, EdgeWeights>::iterator J =
-    EdgeInformation.find(Old);
-  if(J != EdgeInformation.end()) {
-    EdgeInformation[New] = J->second;
-  }
-  EdgeInformation.erase(Old);
-  BlockInformation.erase(Old);
-  FunctionInformation.erase(Old);
 }
 
 static double readEdgeOrRemember(ProfileInfo::Edge edge, double w,

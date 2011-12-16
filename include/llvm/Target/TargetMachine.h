@@ -354,6 +354,12 @@ public:
     return false;
   }
 
+  /// addCustomRegAlloc - This method may be implemented by targets that want
+  /// to run a customized register allocator.
+  virtual bool addCustomRegAlloc(PassManagerBase &) {
+    return false;
+  }
+
   /// addPostRegAlloc - This method may be implemented by targets that want
   /// to run passes after register allocation but before prolog-epilog
   /// insertion.  This should return true if -print-machineinstrs should print

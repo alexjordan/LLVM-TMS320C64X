@@ -31,15 +31,15 @@ class MachineProfileAnalysis {
 
   protected:
 
-    // machine level stuff
-    MachineProfileInfo MPI;
     MachineProfilePathMap MachineProfilePaths;
 
   public:
 
     static char ID;
 
-    // intermediate stuff
+    // intermediate stuff, thats ugly but ok, that is best to be moved to the
+    // machine profile load impl, since the estimating implementation can not
+    // do anything with it, however, leave this monstrosity for now...
     static ProfileInfo *EPI;     // edges
     static PathProfileInfo *PPI; // paths
 
@@ -62,10 +62,11 @@ class MachineProfileAnalysis {
     unsigned pathsSize() const { return MachineProfilePaths.size(); }
 
     // information queries, for now offer a restricted interface only
-    double getExecutionCount(MachineBasicBlock *MBB) const;
-    double getExecutionCount(MachineFunction *MF) const;
-    double getEdgeWeight(MachineProfileInfo::Edge E) const;
-    double getEdgeWeight(MachineBasicBlock*, MachineBasicBlock*) const;
+    virtual double getExecutionCount(const MachineBasicBlock *MBB);
+    virtual double getExecutionCount(const MachineFunction *MF);
+    virtual double getEdgeWeight(MachineProfileInfo::Edge E);
+    virtual double getEdgeWeight(const MachineBasicBlock*,
+                                 const MachineBasicBlock*);
 };
 
 } // end namespace llvm

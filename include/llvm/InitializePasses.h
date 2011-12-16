@@ -126,6 +126,7 @@ void initializeLiveVariablesPass(PassRegistry&);
 void initializeLoaderPassPass(PassRegistry&);
 
 // Added profile loader for machine profile info
+void initializeMachineEdgeProfileEstimatorPass(PassRegistry&);
 void initializePathProfileLoaderPassPass(PassRegistry&);
 void initializeMachineLoaderPassPass(PassRegistry&);
 

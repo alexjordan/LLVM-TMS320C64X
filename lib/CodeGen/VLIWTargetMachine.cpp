@@ -300,9 +300,8 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
 
   // NKim, edge-profile instrumenter breaks all critical edges before doing its
   // instrumenting job. Therefore, to match the block layout, we need to do this
-  // too in cases we are going to use the profile...
-  if (EnablePathProfileLoader || EnableEdgeProfileLoader)
-    PM.add(createBreakCriticalEdgesPass());
+  // too in cases we are going to use the profile...Make it unconditional now...
+  PM.add(createBreakCriticalEdgesPass());
 
   // NKim, create and run a path-profile-loader pass if required. The pass as
   // such is passed to the pass-manager and additionally a reference is stored.
@@ -313,6 +312,7 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   // the 'getAnalysis' template) let me know, for me it just didn't work (without
   // reimplementing a great portion of the PathProfileInfo for the machine side),
   // maybe due to the constraints between the IR and Machine passes
+
   if (EnablePathProfileLoader) {
     if (ModulePass *PathProfileLoader = createPathProfileLoaderPass()) {
       MachineProfileAnalysis::PPI = (PathProfileInfo *)
@@ -401,7 +401,9 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
     printAndVerify(PM, "After PreRegAlloc passes");
 
   // Perform register allocation.
-  PM.add(createRegisterAllocator(OptLevel));
+  if (!addCustomRegAlloc(PM))
+    PM.add(createRegisterAllocator(OptLevel));
+
   printAndVerify(PM, "After Register Allocation");
 
   // Perform stack slot coloring and post-ra machine LICM.

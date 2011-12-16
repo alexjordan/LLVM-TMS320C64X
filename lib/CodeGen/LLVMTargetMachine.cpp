@@ -337,8 +337,8 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   if (!DisableVerify) PM.add(createVerifierPass());
 
   // Standard Lower-Level Passes.
-  if (EnablePathProfileLoader || EnableEdgeProfileLoader)
-    PM.add(createBreakCriticalEdgesPass());
+//  if (EnablePathProfileLoader || EnableEdgeProfileLoader)
+//    PM.add(createBreakCriticalEdgesPass());
 
   // NKim, create and run a path-profile-loader pass if required. The pass as
   // such is passed to the pass-manager and additionally a reference is stored.
@@ -437,7 +437,9 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
     printAndVerify(PM, "After PreRegAlloc passes");
 
   // Perform register allocation.
-  PM.add(createRegisterAllocator(OptLevel));
+  if (!addCustomRegAlloc(PM))
+    PM.add(createRegisterAllocator(OptLevel));
+
   printAndVerify(PM, "After Register Allocation");
 
   // Perform stack slot coloring and post-ra machine LICM.

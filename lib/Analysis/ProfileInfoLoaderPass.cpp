@@ -161,6 +161,7 @@ bool LoaderPass::runOnModule(Module &M) {
     for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
       if (F->isDeclaration()) continue;
       DEBUG(dbgs()<<"Working on "<<F->getNameStr()<<"\n");
+
       readEdge(getEdge(0,&F->getEntryBlock()), Counters);
       for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
         TerminatorInst *TI = BB->getTerminator();
@@ -170,8 +171,9 @@ bool LoaderPass::runOnModule(Module &M) {
       }
     }
     if (ReadCount != Counters.size()) {
-      errs() << "WARNING: profile information is inconsistent with "
-             << "the current program!\n";
+      errs() << "WARNING: edge profile information is inconsistent with the "
+        "current program (read: " << ReadCount << ", size: "
+        << Counters.size() << ")\n";
     }
     NumEdgesRead = ReadCount;
   }
@@ -219,7 +221,7 @@ bool LoaderPass::runOnModule(Module &M) {
     }
     if (ReadCount != Counters.size()) {
       errs() << "WARNING: profile information is inconsistent with "
-             << "the current program!\n";
+             << "the current program (2)!\n";
     }
     NumEdgesRead = ReadCount;
   }
@@ -240,7 +242,7 @@ bool LoaderPass::runOnModule(Module &M) {
     }
     if (ReadCount != Counters.size()) {
       errs() << "WARNING: profile information is inconsistent with "
-             << "the current program!\n";
+             << "the current program (3)!\n";
     }
   }
 
@@ -259,7 +261,7 @@ bool LoaderPass::runOnModule(Module &M) {
     }
     if (ReadCount != Counters.size()) {
       errs() << "WARNING: profile information is inconsistent with "
-             << "the current program!\n";
+             << "the current program (4)!\n";
     }
   }
 

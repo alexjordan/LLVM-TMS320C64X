@@ -629,6 +629,15 @@ multiclass c64ri<dag inDag, dag inOp, SDNode op, InstructionForm default,
                        mnemonic, default, side_b>;
 }
 
+// same format as c64rr, but without patterns, to be used for postisel opts
+multiclass c64rr_special<dag inOp, InstructionForm default, string mnemonic>
+{
+  def _1 : c64new<(outs ARegs:$dst), !con((ins ARegs:$src1), inOp),
+                  mnemonic, default, side_a>; 
+  def _2 : c64new<(outs BRegs:$dst), !con((ins BRegs:$src1), inOp),
+                  mnemonic, default, side_b>;
+}
+
 // swapped version (src operands swapped for added confusion)
 // used by instructions like shift: (TI's ASM reference) src2, src1, dst.
 // LLVM has the src ops swapped and therefore $src2 must be side-fixed.

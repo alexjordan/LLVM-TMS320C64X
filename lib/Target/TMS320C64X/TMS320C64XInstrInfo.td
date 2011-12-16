@@ -252,22 +252,6 @@ def epilog : inst<(outs), (ins), "", [], 0, unit_s> {
 }
 }
 
-// Multiplies - there are a million and one of them, so we'll just be using
-// mpy32. It might be possible to apply various constraints to the size of
-// operands so that we can use 16 bit multiplies, but there's no chance of
-// being able to account for different positions in registers.
-
-// NB: mpy32 is c64x+ only
-
-// moved to flexible encoding
-//let DelaySlots = 3,
-//    hasDelaySlot = 1,
-//    Itinerary = Multiply,
-//    Supported = units_m in {
-//def mpy32_p : pseudo_rr<"mpy32", ".M1", unit_m, mul, 0>;
-//}
-//
-
 ///////////////////////////////////////////////////////////////////////////////
 // MOVE instructions                                                         //
 ///////////////////////////////////////////////////////////////////////////////
@@ -369,7 +353,7 @@ def cmpeq_p_ri : pseudo_ri<"cmpeq", ".L1", (i32 sconst5:$imm), unit_l,
 				cmpeq_node, 1>;
 
 def : Pat<(cmpne_node GPRegs:$reg1, GPRegs:$reg2),
-		(xor_p_ri (cmpeq_p_rr GPRegs:$reg1, GPRegs:$reg2), (i32 1))>;
+            (xor_p_ri (cmpeq_p_rr GPRegs:$reg1, GPRegs:$reg2), (i32 1))>;
 
 // NOTE: Can't use any of the immediate forms of comparison instructions. LLVM
 // always puts the constant operand on the right hand side of all operations,
@@ -379,20 +363,9 @@ def : Pat<(cmpne_node GPRegs:$reg1, GPRegs:$reg2),
 // Possibly it can't be done, we just have to handle it in some machdep fashion.
 
 def cmpgt_p_rr : pseudo_rr<"cmpgt", ".L1", unit_l, cmpgt_node, 0>;
-//def cmpgt_p_ri : pseudo_ri<"cmpgt", ".L1", (i32 sconst5:$imm), unit_l,
-//						cmpgt_node, 1>;
-
 def cmpgtu_p_rr : pseudo_rr<"cmpgtu", ".L1", unit_l, cmpgtu_node, 0>;
-//def cmpgtu_p_ri : pseudo_ri<"cmpgtu", ".L1", (i32 uconst4:$imm), unit_l,
-//						cmpgtu_node, 1>;
-
 def cmplt_p_rr : pseudo_rr<"cmplt", ".L1", unit_l, cmplt_node, 0>;
-//def cmplt_p_ri : pseudo_ri<"cmplt", ".L1", (i32 sconst5:$imm), unit_l,
-//						cmplt_node, 1>;
-
 def cmpltu_p_rr : pseudo_rr<"cmpltu", ".L1", unit_l, cmpltu_node, 0>;
-//def cmpltu_p_ri : pseudo_ri<"cmpltu", ".L1", (i32 uconst4:$imm), unit_l,
-//						cmpltu_node, 1>;
 
 // Select - lowering loads one value into first reg, then we conditionally
 // move the other value into it. Having a pair of instructions both move into
@@ -454,13 +427,14 @@ let Itinerary = Multiply16,
 // def : Pat<(i32 (bswap GPRegs:$src)), (swap4 (swap2 GPRegs:$src))>;
 def : Pat<(i32 (bswap GPRegs:$src)), (bitr GPRegs:$src)>;
 
-// TMS has a native NAND instruction which we may want to issue directly
-def andn : inst<(outs GPRegs:$dst),
-    (ins GPRegs:$src1, GPRegs:$src2, pred:$predReg),
-    "andn\t.L1\t$src1,\t$src2,\t$dst", [], 0, unit_l>;
+// TMS has a special instruction which is useful for some special cases, this
+// instruction inverts one of the sources and performs a bitwise AND with the
+// second source. This is eventually patched in during if-conversion when
+// folding predicates
 
-def : Pat<(i32 (not (and GPRegs:$src1, GPRegs:$src2))),
-    (andn GPRegs:$src1, GPRegs:$src2)>;
+let Supported = units_notm in {
+  defm andn_rr: c64rr_special<(ins GPRegs:$src2), l_form, "andn">;
+}
 
 // counting leading zeroes can be done pretty quickly by using lmbd, define
 // matching patterns properly, eventhough ctlz, cttz, etc. are not matched
