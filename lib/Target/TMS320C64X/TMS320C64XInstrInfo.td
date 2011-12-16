@@ -429,12 +429,18 @@ def : Pat<(i32 (bswap GPRegs:$src)), (bitr GPRegs:$src)>;
 
 // TMS has a special instruction which is useful for some special cases, this
 // instruction inverts one of the sources and performs a bitwise AND with the
-// second source. This is eventually patched in during if-conversion when
-// folding predicates
+// second source. This is currently matched for a couple of benchmarks and is
+// also patched in during if-conversion when folding predicates
 
 let Supported = units_notm in {
   defm andn_rr: c64rr_special<(ins GPRegs:$src2), l_form, "andn">;
 }
+
+def : Pat<(i32 (and ARegs:$src1, (not ARegs:$src2))),
+             (andn_rr_1 ARegs:$src1, ARegs:$src2)>;
+
+def : Pat<(i32 (and BRegs:$src1, (not BRegs:$src2))),
+             (andn_rr_2 BRegs:$src1, BRegs:$src2)>;
 
 // counting leading zeroes can be done pretty quickly by using lmbd, define
 // matching patterns properly, eventhough ctlz, cttz, etc. are not matched
