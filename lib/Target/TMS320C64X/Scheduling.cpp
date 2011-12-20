@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "scheduling"
 #include "Scheduling.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/MachineRegions.h"
@@ -20,8 +21,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#undef DEBUG
-#define DEBUG(x) x
 using namespace llvm;
 using namespace TMS320C64X;
 
@@ -491,9 +490,8 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
   // Remember where a generic side-effecting instruction is as we procede.
   SUnit *BarrierChain = 0, *AliasChain = 0;
 
-  // Used to order side-effecting instructions within the region (ie. between
-  // side exits).
-  SUnit *CallBranchChain = 0;
+  // XXX May be redundant. Maintains order between branches, calls and barriers
+  SUnit *BarrierOrderChain = 0;
 
   // Memory references to specific known memory locations are tracked
   // so that they can be given more precise dependencies. We track
@@ -568,12 +566,12 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
       }
       // keep side-effect instructions from crossing barriers
       // XXX use latency of the branch?
-      //if (SideEffectChain)
-      //  SideEffectChain->addPred(SDep(BarrierSU, SDep::Order, 1));
-      if (PreviousBarrier)
-        PreviousBarrier->addPred(SDep(BarrierSU, SDep::Order, 0));
+      if (BarrierOrderChain)
+        BarrierOrderChain->addPred(SDep(BarrierSU, SDep::Order, 0));
+      if (BarrierChain)
+        BarrierChain->addPred(SDep(BarrierSU, SDep::Order, 0));
       PreviousBarrier = BarrierSU;
-      //SideEffectChain = BarrierSU;
+      BarrierOrderChain = BarrierSU;
       continue;
     }
     // Create the SUnit for this MI.
@@ -754,9 +752,9 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
     }
 
     if (TID.isCall() || TID.isBranch()) {
-      if (CallBranchChain)
-        CallBranchChain->addPred(SDep(SU, SDep::Order, SU->Latency));
-      CallBranchChain = SU;
+      if (BarrierOrderChain)
+        BarrierOrderChain->addPred(SDep(SU, SDep::Order, SU->Latency));
+      BarrierOrderChain = SU;
     }
 
     // Add chain dependencies.
@@ -817,9 +815,9 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
       AliasMemUses.clear();
     } else if (TID.mayStore()) {
 
-      //if (SideEffectChain)
-      //  SideEffectChain->addPred(SDep(SU, SDep::Order, /*Latency=*/1));
-      //SideEffectChain = SU;
+      if (BarrierChain)
+        BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
+      BarrierChain = SU;
 
       bool MayAlias = true;
       TrueMemOrderLatency = STORE_LOAD_LATENCY;
@@ -861,9 +859,11 @@ void TMS320C64X::SchedulerBase::BuildSchedGraph(ForwardIter first,
           if (AliasChain)
             AliasChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
         }
+        // AJO: Need to keep all stores within barriers. This is done (above)
+        // for all stores.
         // Add dependence on barrier chain, if needed.
-        if (BarrierChain)
-          BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
+        //if (BarrierChain)
+        //  BarrierChain->addPred(SDep(SU, SDep::Order, /*Latency=*/0));
       } else {
         // Treat all other stores conservatively.
         goto new_alias_chain;
@@ -1004,13 +1004,30 @@ void RegionScheduler::preprocess(MachineSingleEntryPathRegion *MR) const {
 
   for (MachineRegion::iterator I = MR->begin(), E = MR->end(); I != E; ++I) {
     MachineBasicBlock *MBB = *I;
-    if (MBB->getFirstTerminator() == MBB->end()) {
+
+    // eliminiate trivial PHIs in blocks other than the entry
+    if (I != MR->begin()) {
+      MachineBasicBlock::iterator MI = MBB->begin();
+      while (MI->isPHI()) {
+        assert(MI->getNumOperands() == 3 && "non-trivial PHI within region");
+        MI->setDesc(TII->get(TargetOpcode::COPY));
+        MI->RemoveOperand(2);
+        ++MI;
+      }
+    }
+
+    if (I != --(MR->end()) &&
+        MBB->getFirstTerminator() == MBB->end()) {
+      // should already have happened in a preparation pass
+      assert(false && "fallthroughs expected to be eliminated");
+#if 0
       assert(!MBB->succ_empty());
       DEBUG(dbgs() << "inserted branch for fallthrough (" << MBB->getName()
             << ")\n");
       TII->InsertBranch(*MBB, *MBB->succ_begin(), NULL,
                         SmallVector<MachineOperand,0>(),
                         DebugLoc());
+#endif
     }
   }
 }

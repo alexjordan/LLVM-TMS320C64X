@@ -28,6 +28,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <queue>
 
 using namespace llvm;
 using namespace llvm::TMS320C64X;
@@ -327,7 +328,12 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
   TMS320C64XMachineFunctionInfo *MFI =
     Fn.getInfo<TMS320C64XMachineFunctionInfo>();
 
+  std::queue<MachineBasicBlock*> ScheduleQ;
+  std::vector<unsigned> PredsVisited(Fn.size(), 0);
   std::set<MachineBasicBlock*> Scheduled;
+  typedef std::map<MachineBasicBlock*, MachineSuperBlock*> EntryMSBMap;
+  EntryMSBMap Entries;
+
   unsigned sumCycles = 0;
 
   MachineSuperBlockMapTy MSBs = SuperblockFormation::getSuperblocks();
@@ -340,31 +346,57 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
     TMS320C64XInstrInfo::CreateFunctionalUnitScheduler(&TM);
   Scheduler->setFunctionalUnitScheduler(RA);
 
-  // XXX schedule regions first, then other blocks?
+  // index the superblocks by their entry block
   for (MachineSuperBlockMapTy::iterator MSBI = MSBs.begin(), MSBE = MSBs.end();
        MSBI != MSBE; ++MSBI) {
-    Scheduled.insert(MSBI->second->begin(), MSBI->second->end());
-    Scheduler->Run(MSBI->second);
-    sumCycles += Scheduler->getCycles();
+    MachineSuperBlock *MSB = MSBI->second;
+    Entries.insert(std::make_pair(MSB->getEntry(), MSB));
   }
 
-  for (MachineFunction::iterator MBB = Fn.begin(), MBBe = Fn.end();
-       MBB != MBBe; ++MBB) {
-    // already scheduled as part of a region
-    if (Scheduled.count(MBB) || !MBB->size())
+  // During cluster assignment register classes are changed. To make sure that a
+  // register def is assigned before its uses, we walk the CFG.
+  // An alternative would be to insert compensation copies.
+  ScheduleQ.push(&Fn.front());
+
+  while (!ScheduleQ.empty()) {
+    MachineBasicBlock *MBB = ScheduleQ.front();
+    ScheduleQ.pop();
+
+    if (Scheduled.count(MBB))
       continue;
 
-    // XXX handle PHIs
-    assignPHIs(&State, MBB);
-    // make MBB into a trivial region
-    MachineSingleEntryPathRegion region(Fn, *MBB);
-    Scheduler->Run(&region);
-    sumCycles += Scheduler->getCycles();
-  }
+    MachineSuperBlock *MSB;
+    std::auto_ptr<MachineSuperBlock> ownedMSB; // used to release object
+    EntryMSBMap::iterator it;
+    if ((it = Entries.find(MBB)) != Entries.end()) {
+      // if MBB is part of a suberblock, schedule the whole superblock
+      MSB = it->second;
+    } else {
+      // single MBB: schedule as trivial region
+      if (!MBB->size())
+        continue;
+      ownedMSB = std::auto_ptr<MachineSuperBlock>(
+        new MachineSuperBlock(Fn, *MBB));
+      MSB = ownedMSB.get();
+    }
 
-  Fn.verifySSA(this, "After Cluster Assignment");
-  if (DebugFlag && isCurrentDebugType(DEBUG_TYPE))
-    Fn.dump();
+    // XXX handle PHIs better?
+    assignPHIs(&State, MBB);
+    Scheduler->Run(MSB);
+    Scheduled.insert(MSB->begin(), MSB->end());
+    sumCycles += Scheduler->getCycles();
+
+
+    // queue successors blocks
+    for (MachineSuperBlock::iterator MBBI = MSB->begin(), MBBE = MSB->end();
+         MBBI != MBBE; ++MBBI) {
+      for (MachineBasicBlock::succ_iterator SI = (*MBBI)->succ_begin(),
+           SE = (*MBBI)->succ_end(); SI != SE; ++SI) {
+        MachineBasicBlock *Succ = *SI;
+        ScheduleQ.push(Succ);
+      }
+    }
+  }
 
   MFI->setScheduledCyclesPre(sumCycles);
 

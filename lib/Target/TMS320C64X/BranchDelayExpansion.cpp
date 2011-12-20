@@ -20,8 +20,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#undef DEBUG
-#define DEBUG(x) x
+//#undef DEBUG
+//#define DEBUG(x) x
 using namespace llvm;
 using namespace TMS320C64X;
 
@@ -83,6 +83,14 @@ bool BranchDelayExpander::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
 
   for (MachineBasicBlock::iterator I = MBB.getFirstTerminator(), E = MBB.end();
        I != E;) {
+
+    // a branch to the following block is elimited (becomes fallthrough)
+    if (I->getOpcode() == TMS320C64X::branch &&
+        MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
+      MBB.erase(I++);
+      continue;
+    }
+
     // remember where the branch is
     MachineBasicBlock::iterator BI = I;
 
@@ -99,9 +107,6 @@ bool BranchDelayExpander::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
     MBB.erase(BI);
     Changed |= true;
   }
-
-  if (Changed)
-    MBB.dump();
 
   return Changed;
 }
@@ -132,9 +137,6 @@ bool BranchDelayReducer::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
     MBB.erase(I++);
     Changed |= true;
   }
-
-  if (Changed)
-    MBB.dump();
 
   return Changed;
 }
