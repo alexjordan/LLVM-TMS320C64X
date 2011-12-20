@@ -948,12 +948,6 @@ void TMS320C64X::RegionScheduler::BuildSchedGraph(AliasAnalysis *AA) {
   end = MR->instr_rend();
 
   SchedulerBase::BuildSchedGraph(begin, end, AA);
-
-#if 1
-  BB = const_cast<MachineBasicBlock*>(MR->getEntry());
-  viewGraph();
-  BB = NULL;
-#endif
 }
 
 bool RegionScheduler::isBeingScheduled(MachineBasicBlock *MBB) const {
@@ -1111,3 +1105,11 @@ MachineBasicBlock *TMS320C64X::RegionScheduler::EmitSchedule() {
 
   return const_cast<MachineBasicBlock*>(MR->getEntry());
 }
+
+void RegionScheduler::viewRegionGraph() {
+  // viewGraph() uses the name of BB, so it must not be NULL
+  BB = const_cast<MachineBasicBlock*>(MR->getEntry());
+  viewGraph();
+  BB = NULL;
+}
+
