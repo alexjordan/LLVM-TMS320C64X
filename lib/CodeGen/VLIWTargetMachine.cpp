@@ -217,12 +217,13 @@ static void printNoVerify(PassManagerBase &PM, const char *Banner) {
 }
 
 static void printAndVerify(PassManagerBase &PM,
-                           const char *Banner) {
+                           const char *Banner,
+                           bool VerifySSA = false) {
   if (PrintMachineCode)
     PM.add(createMachineFunctionPrinterPass(dbgs(), Banner));
 
   if (VerifyMachineCode)
-    PM.add(createMachineVerifierPass(Banner));
+    PM.add(createMachineVerifierPass(Banner, VerifySSA));
 }
 
 /// addCommonCodeGenPasses - Add standard LLVM codegen passes used for both
@@ -355,6 +356,7 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
     PM.add(createSuperblockFormationPass());
 //    PM.add(createSuperblockPlacementPass());
   }
+  printAndVerify(PM, "After Superblock Formation", true);
 
   // Optimize PHIs before DCE: removing dead PHI cycles may make more
   // instructions dead.

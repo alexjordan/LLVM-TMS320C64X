@@ -205,19 +205,25 @@ namespace {
   struct MachineVerifierPass : public MachineFunctionPass {
     static char ID; // Pass ID, replacement for typeid
     const char *const Banner;
+    bool VerifySSA;
 
-    MachineVerifierPass(const char *b = 0)
-      : MachineFunctionPass(ID), Banner(b) {
+    MachineVerifierPass(const char *b = 0, bool ssa = false)
+      : MachineFunctionPass(ID), Banner(b), VerifySSA(ssa) {
         initializeMachineVerifierPassPass(*PassRegistry::getPassRegistry());
       }
 
     void getAnalysisUsage(AnalysisUsage &AU) const {
       AU.setPreservesAll();
+      if (VerifySSA)
+        AU.addRequired<MachineDominatorTree>();
       MachineFunctionPass::getAnalysisUsage(AU);
     }
 
     bool runOnMachineFunction(MachineFunction &MF) {
-      MF.verify(this, Banner);
+      if (VerifySSA)
+        MF.verifySSA(this, Banner);
+      else
+        MF.verify(this, Banner);
       return false;
     }
   };
@@ -228,8 +234,9 @@ char MachineVerifierPass::ID = 0;
 INITIALIZE_PASS(MachineVerifierPass, "machineverifier",
                 "Verify generated machine code", false, false)
 
-FunctionPass *llvm::createMachineVerifierPass(const char *Banner) {
-  return new MachineVerifierPass(Banner);
+FunctionPass *llvm::createMachineVerifierPass(const char *Banner,
+                                              bool VerifySSA) {
+  return new MachineVerifierPass(Banner, VerifySSA);
 }
 
 void MachineFunction::verify(Pass *p, const char *Banner) const {

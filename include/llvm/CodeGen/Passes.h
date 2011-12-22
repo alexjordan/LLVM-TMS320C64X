@@ -226,7 +226,8 @@ namespace llvm {
 
   /// createMachineVerifierPass - This pass verifies cenerated machine code
   /// instructions for correctness.
-  FunctionPass *createMachineVerifierPass(const char *Banner = 0);
+  FunctionPass *createMachineVerifierPass(const char *Banner = 0,
+                                          bool verifySSA = false);
 
   /// createDwarfEHPass - This pass mulches exception handling code into a form
   /// adapted to code generation.  Required if using dwarf exception handling.
