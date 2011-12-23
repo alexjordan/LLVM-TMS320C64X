@@ -29,19 +29,6 @@ namespace llvm {
   class MachineInstr;
   class TMS320C64XInstrInfo;
 
-namespace TMS320C64X {
-
-/// cluster assignment algorithms available through options
-enum AssignmentAlgorithm {
-  ClusterNone,
-  ClusterB,
-  ClusterUAS,
-  ClusterUAS_none,
-  ClusterUAS_rand,
-  ClusterUAS_mwp
-};
-}
-
 /// assignment hooks exposed to scheduling implementations
 class AssignmentState {
   IndexedMap<unsigned, VirtReg2IndexFunctor> VXcc[2];

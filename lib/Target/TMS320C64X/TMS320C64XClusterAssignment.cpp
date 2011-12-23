@@ -28,6 +28,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <queue>
 
 using namespace llvm;
 using namespace llvm::TMS320C64X;
@@ -106,20 +107,6 @@ struct DagAssign : public TMS320C64XClusterAssignment {
   void assignPHIs(AssignmentState *State, MachineBasicBlock *MBB);
 };
 }
-
-static cl::opt<AssignmentAlgorithm>
-ClusterOpt("c64x-clst",
-  cl::desc("Choose a cluster assignment algorithm"),
-  cl::NotHidden,
-  cl::values(
-    clEnumValN(ClusterNone, "none", "Do not assign clusters"),
-    clEnumValN(ClusterB, "bside", "Assign everything to cluster B"),
-    clEnumValN(ClusterUAS, "uas", "Unified assign and schedule"),
-    clEnumValN(ClusterUAS_none, "uas-none", "UAS (no priority: A before B)"),
-    clEnumValN(ClusterUAS_rand, "uas-rand", "UAS (random cluster priority)"),
-    clEnumValN(ClusterUAS_mwp, "uas-mwp", "UAS (magnitude weighted pred)"),
-    clEnumValEnd),
-  cl::init(ClusterNone));
 
 //
 // TMS320C64XClusterAssignment implementation
@@ -341,7 +328,12 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
   TMS320C64XMachineFunctionInfo *MFI =
     Fn.getInfo<TMS320C64XMachineFunctionInfo>();
 
+  std::queue<MachineBasicBlock*> ScheduleQ;
+  std::vector<unsigned> PredsVisited(Fn.size(), 0);
   std::set<MachineBasicBlock*> Scheduled;
+  typedef std::map<MachineBasicBlock*, MachineSuperBlock*> EntryMSBMap;
+  EntryMSBMap Entries;
+
   unsigned sumCycles = 0;
 
   MachineSuperBlockMapTy MSBs = SuperblockFormation::getSuperblocks();
@@ -354,31 +346,57 @@ bool DagAssign::runOnMachineFunction(MachineFunction &Fn) {
     TMS320C64XInstrInfo::CreateFunctionalUnitScheduler(&TM);
   Scheduler->setFunctionalUnitScheduler(RA);
 
-  // XXX schedule regions first, then other blocks?
+  // index the superblocks by their entry block
   for (MachineSuperBlockMapTy::iterator MSBI = MSBs.begin(), MSBE = MSBs.end();
        MSBI != MSBE; ++MSBI) {
-    Scheduled.insert(MSBI->second->begin(), MSBI->second->end());
-    Scheduler->Run(MSBI->second);
-    sumCycles += Scheduler->getCycles();
+    MachineSuperBlock *MSB = MSBI->second;
+    Entries.insert(std::make_pair(MSB->getEntry(), MSB));
   }
 
-  for (MachineFunction::iterator MBB = Fn.begin(), MBBe = Fn.end();
-       MBB != MBBe; ++MBB) {
-    // already scheduled as part of a region
-    if (Scheduled.count(MBB) || !MBB->size())
+  // During cluster assignment register classes are changed. To make sure that a
+  // register def is assigned before its uses, we walk the CFG.
+  // An alternative would be to insert compensation copies.
+  ScheduleQ.push(&Fn.front());
+
+  while (!ScheduleQ.empty()) {
+    MachineBasicBlock *MBB = ScheduleQ.front();
+    ScheduleQ.pop();
+
+    if (Scheduled.count(MBB))
       continue;
 
-    // XXX handle PHIs
-    assignPHIs(&State, MBB);
-    // make MBB into a trivial region
-    MachineSingleEntryPathRegion region(Fn, *MBB);
-    Scheduler->Run(&region);
-    sumCycles += Scheduler->getCycles();
-  }
+    MachineSuperBlock *MSB;
+    std::auto_ptr<MachineSuperBlock> ownedMSB; // used to release object
+    EntryMSBMap::iterator it;
+    if ((it = Entries.find(MBB)) != Entries.end()) {
+      // if MBB is part of a suberblock, schedule the whole superblock
+      MSB = it->second;
+    } else {
+      // single MBB: schedule as trivial region
+      if (!MBB->size())
+        continue;
+      ownedMSB = std::auto_ptr<MachineSuperBlock>(
+        new MachineSuperBlock(Fn, *MBB));
+      MSB = ownedMSB.get();
+    }
 
-  Fn.verifySSA(this, "After Cluster Assignment");
-  if (DebugFlag && isCurrentDebugType(DEBUG_TYPE))
-    Fn.dump();
+    // XXX handle PHIs better?
+    assignPHIs(&State, MBB);
+    Scheduler->Run(MSB);
+    Scheduled.insert(MSB->begin(), MSB->end());
+    sumCycles += Scheduler->getCycles();
+
+
+    // queue successors blocks
+    for (MachineSuperBlock::iterator MBBI = MSB->begin(), MBBE = MSB->end();
+         MBBI != MBBE; ++MBBI) {
+      for (MachineBasicBlock::succ_iterator SI = (*MBBI)->succ_begin(),
+           SE = (*MBBI)->succ_end(); SI != SE; ++SI) {
+        MachineBasicBlock *Succ = *SI;
+        ScheduleQ.push(Succ);
+      }
+    }
+  }
 
   MFI->setScheduledCyclesPre(sumCycles);
 
@@ -518,8 +536,10 @@ const TargetRegisterClass *AssignmentState::getVChange(unsigned reg) const {
   return VirtMap[reg];
 }
 
-FunctionPass *llvm::createTMS320C64XClusterAssignment(TargetMachine &tm) {
-  switch (ClusterOpt) {
+FunctionPass *llvm::createTMS320C64XClusterAssignment(
+                            TargetMachine &tm,
+                            TMS320C64X::AssignmentAlgorithm alg) {
+  switch (alg) {
   default: llvm_unreachable("unknown cluster assignment");
   case ClusterNone: return new NoAssign(tm);
   case ClusterB:    return new BSideAssigner(tm);
@@ -527,7 +547,7 @@ FunctionPass *llvm::createTMS320C64XClusterAssignment(TargetMachine &tm) {
   case ClusterUAS_none:
   case ClusterUAS_rand:
   case ClusterUAS_mwp:
-                    return new DagAssign(tm, ClusterOpt);
+                    return new DagAssign(tm, alg);
   }
 }
 

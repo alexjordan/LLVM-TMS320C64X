@@ -61,6 +61,9 @@ namespace TMS320C64X {
     // returns the entry  block of the region
     virtual MachineBasicBlock *EmitSchedule();
     void Run(MachineSingleEntryPathRegion *R);
+
+    // custom method for displaying the DAG
+    void viewRegionGraph();
   };
 }
 }

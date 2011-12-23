@@ -54,6 +54,7 @@ class SuperblockFormation : public MachineFunctionPass {
     /// pass statistics
     unsigned NumSuperBlocks;
     unsigned NumDuplicatedBlocks;
+    unsigned NumMergedFallthroughs;
 
     /// this is a map we store all created/identified nontrivial superblocks
     /// in. We use the execution count of the trace as a key to the multimap
@@ -90,6 +91,12 @@ class SuperblockFormation : public MachineFunctionPass {
     /// implement some kind of a tail-duplication. For the time being, this
     /// tail is created once and is shared by all side-entries into the SB
     void eliminateSideEntries(const MBBListTy &SB);
+
+    /// for simplified scheduling it may be desirable to remove fallthrough
+    /// transitions. This is done by duplicating the destination block into
+    /// its only (!) predecessor. That assumes, that all side entries have
+    /// been eliminated already
+    void eliminateFallthroughs(MBBListTy &SB);
 
   public:
 

@@ -34,13 +34,28 @@ namespace llvm {
   class PassRegistry;
   class FunctionPass;
 
+  namespace TMS320C64X {
+    /// cluster assignment algorithms available through options
+    enum AssignmentAlgorithm {
+      ClusterNone,
+      ClusterB,
+      ClusterUAS,
+      ClusterUAS_none,
+      ClusterUAS_rand,
+      ClusterUAS_mwp
+    };
+  }
+
   // initialize the if-conversion for the TMS320C64X target
   void initializeTMS320C64XIfConversionPass(PassRegistry&);
 
   FunctionPass *TMS320C64XCreateInstSelector(TargetMachine &TM);
-  FunctionPass *createTMS320C64XClusterAssignment(TargetMachine &tm);
+  FunctionPass *createTMS320C64XClusterAssignment(TargetMachine &tm,
+                                      TMS320C64X::AssignmentAlgorithm alg);
   FunctionPass *createTMS320C64XDelaySlotFillerPass(TargetMachine &tm);
   FunctionPass *createTMS320C64XScheduler(TargetMachine &tm);
+  FunctionPass *createTMS320C64XBranchDelayExpander(TargetMachine &tm);
+  FunctionPass *createTMS320C64XBranchDelayReducer(TargetMachine &tm);
 
   /// createTMS320C64XIfConversionPass - create a pass for converting if/
   /// else structures for the machine basic blocks for the TMS320C64X target.

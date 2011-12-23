@@ -76,6 +76,7 @@ class MachineSingleEntryRegion {
 
     const MachineFunction *getParent() const { return parent; }
     const MachineBasicBlock *getEntry() const { return entry; }
+    MachineBasicBlock *getEntry() { return entry; }
 
     /// "begin" iterators for convenience. We do not yet export the entire
     /// list of basic blocks for a region in order to restrict the access to

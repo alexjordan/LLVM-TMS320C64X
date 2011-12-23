@@ -355,8 +355,8 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   if (BuildSuperblocks) {
     PM.add(createSuperblockFormationPass());
 //    PM.add(createSuperblockPlacementPass());
+    printAndVerify(PM, "After Superblock Formation", true);
   }
-  printAndVerify(PM, "After Superblock Formation", true);
 
   // Optimize PHIs before DCE: removing dead PHI cycles may make more
   // instructions dead.
@@ -400,7 +400,7 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
 
   // Run pre-ra passes.
   if (addPreRegAlloc(PM, OptLevel))
-    printAndVerify(PM, "After PreRegAlloc passes");
+    printAndVerify(PM, "After PreRegAlloc passes", true);
 
   // Perform register allocation.
   if (!addCustomRegAlloc(PM))
