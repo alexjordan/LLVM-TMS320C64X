@@ -287,6 +287,8 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setOperationAction(ISD::VACOPY, MVT::Other, Expand);
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
 
+  setOperationAction(ISD::INTRINSIC_W_CHAIN, MVT::Other, Custom);
+
   setStackPointerRegisterToSaveRestore(TMS320C64X::A15);
   computeRegisterProperties();
   return;
@@ -347,6 +349,12 @@ const char *TMS320C64XLowering::getTargetNodeName(unsigned op) const {
 
     case TMSISD::WRAPPER:
       return "TMSISD::WRAPPER";
+
+    case TMSISD::TSC_START:
+      return "TMSISD::TSC_START";
+
+    case TMSISD::TSC_END:
+      return "TMSISD::TSC_END";
   }
 }
 
@@ -763,6 +771,8 @@ TMS320C64XLowering::LowerOperation(SDValue op,  SelectionDAG &DAG) const {
       return LowerVASTART(op, DAG);
     case ISD::VAARG:
       return LowerVAARG(op, DAG);
+    case ISD::INTRINSIC_W_CHAIN:
+      return LowerIntrinsic(op, DAG);
     default:
       llvm_unreachable(op.getNode()->getOperationName().c_str());
   }
@@ -1042,3 +1052,26 @@ TMS320C64XLowering::setLibcallCustom(RTLIB::Libcall Call, const char *Name) {
   // set as name of the call
   setLibcallName(Call, stored);
 }
+
+SDValue
+TMS320C64XLowering::LowerIntrinsic(SDValue op, SelectionDAG &DAG) const
+{
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineRegisterInfo &RegInfo = MF.getRegInfo();
+  DebugLoc dl = op.getDebugLoc();
+  unsigned IntNo = cast<ConstantSDNode>(op.getOperand(1))->getZExtValue();
+  unsigned Opc = 0;
+  switch (IntNo) {
+  default: llvm_unreachable("unknown intrinsic"); break;
+  case Intrinsic::c64x_timestamp_start: Opc = TMSISD::TSC_START; break;
+  case Intrinsic::c64x_timestamp_end: Opc = TMSISD::TSC_END; break;
+  }
+
+  // return i32 result and chain
+  SDVTList Results = DAG.getVTList(MVT::i32, MVT::Other);
+  // only incoming operand is the chain
+  SDValue Chain = DAG.getNode(Opc, dl, Results, op.getOperand(0));
+
+  return Chain;
+}
+

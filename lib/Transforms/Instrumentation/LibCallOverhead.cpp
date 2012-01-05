@@ -41,9 +41,15 @@ namespace {
       return "Libcall overhead instrumentation";
     }
 
-    Value *getCycles(IRBuilder<> &B);
-    //Value *Counter(IRBuilder<> &B);
+    Value *getCyclesBefore(IRBuilder<> &B);
+    Value *getCyclesAfter(IRBuilder<> &B);
     Function *getOrCreateWrapper(CallInst *CI, Function *Callee);
+
+    // XXX subtract this for every call we measure (value as observed in .asm
+    // file). we would rather want to place the instrumentation instructions
+    // tightly around the call to avoid anomalies, but we need a backend pass
+    // for that.
+    static const int InstrumentationOverhead = 5;
   };
 }
 
@@ -54,9 +60,18 @@ INITIALIZE_PASS(LibCallOverhead, "libcall-overhead",
 
 ModulePass *llvm::createLibCallOverheadPass() { return new LibCallOverhead(); }
 
-Value *LibCallOverhead::getCycles(IRBuilder<> &B) {
+Value *LibCallOverhead::getCyclesBefore(IRBuilder<> &B) {
   Module *M = B.GetInsertBlock()->getParent()->getParent();
-  Value *Clock = M->getOrInsertFunction("clock",
+  Value *Clock = M->getOrInsertFunction("llvm.c64x.timestamp.start",
+                                        B.getInt32Ty(),
+                                        NULL);
+  CallInst *CI = B.CreateCall(Clock, "cycles");
+  return CI;
+}
+
+Value *LibCallOverhead::getCyclesAfter(IRBuilder<> &B) {
+  Module *M = B.GetInsertBlock()->getParent()->getParent();
+  Value *Clock = M->getOrInsertFunction("llvm.c64x.timestamp.end",
                                         B.getInt32Ty(),
                                         NULL);
   CallInst *CI = B.CreateCall(Clock, "cycles");
@@ -121,7 +136,7 @@ Function *LibCallOverhead::getOrCreateWrapper(CallInst *CI, Function *Callee) {
   Builder.SetInsertPoint(BB);
 
   // get cycles before call
-  Value *c1 = getCycles(Builder);
+  Value *c1 = getCyclesBefore(Builder);
   // make the call
   Value *RetVal = NULL;
   if (!RetTy->isVoidTy())
@@ -129,11 +144,31 @@ Function *LibCallOverhead::getOrCreateWrapper(CallInst *CI, Function *Callee) {
   else
     Builder.CreateCall(Callee, Args.begin(), Args.end());
   // calculate and update the cycle overhead
-  Value *c2 = getCycles(Builder);
-  Value *duration = Builder.CreateSub(c2, c1, c2->getName());
+  Value *c2 = getCyclesAfter(Builder);
+  Value *difference = Builder.CreateSub(c2, c1, c2->getName());
+  Value *duration =
+    Builder.CreateSub(difference,
+                      ConstantInt::get(Builder.getInt32Ty(),
+                                       InstrumentationOverhead), "duration");
   Value *old = Builder.CreateLoad(OverheadCounter, false, "overh");
   Value *updated = Builder.CreateAdd(old, duration, old->getName());
   Builder.CreateStore(updated, OverheadCounter, false);
+
+#if 0
+  // for debugging we may print the calculated cycles right away
+  std::vector<const Type*> args;
+  args.push_back(Builder.getInt8PtrTy());
+  FT = FunctionType::get(Builder.getInt32Ty(), args, true);
+
+  Value *printf = M->getOrInsertFunction("printf", FT);
+  Value *str = Builder.CreateGlobalString("cycles: %d\n");
+  Value *idx[2];
+  idx[0] = ConstantInt::get(Builder.getInt32Ty(), 0);
+  idx[1] = idx[0];
+
+  Value *gep = Builder.CreateInBoundsGEP(str, idx, idx + 2, "gep");
+  Builder.CreateCall2(printf, gep, duration);
+#endif
 
   // return the result of the original call
   if (RetVal)
