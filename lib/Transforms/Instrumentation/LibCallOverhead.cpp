@@ -45,11 +45,8 @@ namespace {
     Value *getCyclesAfter(IRBuilder<> &B);
     Function *getOrCreateWrapper(CallInst *CI, Function *Callee);
 
-    // XXX subtract this for every call we measure (value as observed in .asm
-    // file). we would rather want to place the instrumentation instructions
-    // tightly around the call to avoid anomalies, but we need a backend pass
-    // for that.
-    static const int InstrumentationOverhead = 5;
+    // subtracted from every call we measure
+    static const int InstrumentationOverhead = 2;
   };
 }
 
@@ -88,7 +85,7 @@ Function *LibCallOverhead::getOrCreateWrapper(CallInst *CI, Function *Callee) {
 
   SmallString<64> typenames;
   if (FT->isVarArg()) {
-    assert(Callee->getName().equals("printf"));
+    //assert(Callee->getName().equals("printf"));
     ArgTys.clear();
     for (unsigned i = 0; i < CI->getNumArgOperands(); ++i) {
       const Type *ty = CI->getArgOperand(i)->getType();
@@ -155,7 +152,8 @@ Function *LibCallOverhead::getOrCreateWrapper(CallInst *CI, Function *Callee) {
   Builder.CreateStore(updated, OverheadCounter, false);
 
 #if 0
-  // for debugging we may print the calculated cycles right away
+  // for debugging we may print the calculated cycles right away.
+  // (this may considerably slow down the program due to I/O)
   std::vector<const Type*> args;
   args.push_back(Builder.getInt8PtrTy());
   FT = FunctionType::get(Builder.getInt32Ty(), args, true);
@@ -168,6 +166,7 @@ Function *LibCallOverhead::getOrCreateWrapper(CallInst *CI, Function *Callee) {
 
   Value *gep = Builder.CreateInBoundsGEP(str, idx, idx + 2, "gep");
   Builder.CreateCall2(printf, gep, duration);
+  dbgs() << "overhead cycle printf added\n";
 #endif
 
   // return the result of the original call

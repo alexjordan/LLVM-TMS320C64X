@@ -39,6 +39,10 @@ static cl::opt<bool> EnableIfConversion("if-conversion",
   cl::Hidden, cl::desc("Perform an if-conversion for the TMS320C64X target"),
   cl::init(false));
 
+static cl::opt<bool> EnableCallTimer("enable-libcall-timing",
+  cl::Hidden, cl::desc("Enable backend support for timing of libcalls. (c64x)"),
+  cl::init(false));
+
 static cl::opt<AssignmentAlgorithm>
 ClusterOpt("c64x-clst",
   cl::desc("Choose a cluster assignment algorithm"),
@@ -146,13 +150,21 @@ bool TMS320C64XTargetMachine::addPreEmitPass(PassManagerBase &PM,
 bool TMS320C64XTargetMachine::addPostISel(PassManagerBase &PM,
                                           CodeGenOpt::Level OptLevel)
 {
+  bool passesAdded = false;
+
   if (EnableIfConversion) {
     PM.add(createTMS320C64XIfConversionPass(*this));
 
     // NKim, makes sense to run a taildup + eventually a machine dce passes
     // afterward, due to a flatten out cfg and basic phi-elim/restructuring
-    return true;
+    passesAdded = true;
   }
-  return false;
+
+  if (EnableCallTimer) {
+    PM.add(createTMS320C64XCallTimerPass(*this));
+    passesAdded = true;
+  }
+
+  return passesAdded;
 }
 
