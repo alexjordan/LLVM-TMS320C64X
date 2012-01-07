@@ -28,6 +28,9 @@ ModulePass *createOptimalEdgeProfilerPass();
 // Insert path profiling instrumentation
 ModulePass *createPathProfilerPass();
 
+// Insert libcall overhead counting
+ModulePass *createLibCallOverheadPass();
+
 } // End llvm namespace
 
 #endif

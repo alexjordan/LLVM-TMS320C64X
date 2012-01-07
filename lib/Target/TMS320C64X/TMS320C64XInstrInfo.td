@@ -72,6 +72,8 @@ def SDT_tmsselect : SDTypeProfile<1, 4, [SDTCisVT<0, i32>, SDTCisVT<1, i32>,
 
 def SDT_Wrapper : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisPtrTy<0>]>;
 
+def SDT_TSC : SDTypeProfile<1, 0, [SDTCisVT<0, i32>]>;
+
 ////////////////////////
 /// Node definitions ///
 ////////////////////////
@@ -118,6 +120,9 @@ def tmsselect : SDNode<"TMSISD::SELECT", SDT_tmsselect>;
 
 def Wrapper : SDNode<"TMSISD::WRAPPER", SDT_Wrapper>;
 
+def tsc_start : SDNode<"TMSISD::TSC_START", SDT_TSC, [SDNPHasChain]>;
+def tsc_end : SDNode<"TMSISD::TSC_END", SDT_TSC, [SDNPHasChain]>;
+
 def BUNDLE_END : pseudoinst<(outs), (ins), "${:comment} BUNDLE_END", []>;
 
 def BR_PREPARE : pseudoinst<(outs), (ins), "${:comment} branch prepare", []> {
@@ -132,6 +137,15 @@ def BR_OCCURS : pseudoinst<(outs), (ins), "${:comment} branch occurs", []> {
   let isTerminator = 1;
   let isBarrier = 1;
 }
+
+// timestamp copying instructions
+// XXX currently as pseudoinsts - should be inserted with a backend pass
+def mvc_start : pseudoinst<(outs BRegs:$dst), (ins),
+                           "MVC\t\t$dst,\tTSCL\n\t\tMVC\t\tTSCL,\t$dst", []>;
+def mvc_end : pseudoinst<(outs BRegs:$dst), (ins), "MVC\t\tTSCL,\t$dst", []>;
+
+def : Pat< (tsc_start), (mvc_start)>;
+def : Pat< (tsc_end), (mvc_end)>;
 
 // XXX These should probably be marked as for codegen modelling only.
 // Don't have flexibility to test right now though.

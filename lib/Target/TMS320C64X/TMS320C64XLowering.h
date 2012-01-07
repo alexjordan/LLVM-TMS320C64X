@@ -52,6 +52,8 @@ enum {
   RETURN_LABEL,
   RETURN_LABEL_OPERAND,
   SELECT,
+  TSC_START,
+  TSC_END,
   WRAPPER
 };
 }
@@ -127,6 +129,8 @@ class TMS320C64XLowering : public TargetLowering {
     SDValue LowerSelect(SDValue op, SelectionDAG &DAG) const;
     SDValue LowerVASTART(SDValue op, SelectionDAG &DAG) const;
     SDValue LowerVAARG(SDValue op, SelectionDAG &DAG) const;
+
+    SDValue LowerIntrinsic(SDValue op, SelectionDAG &DAG) const;
 
     std::pair<SDValue,bool> ConvertSETCC(SDValue op, SelectionDAG &DAG) const;
 

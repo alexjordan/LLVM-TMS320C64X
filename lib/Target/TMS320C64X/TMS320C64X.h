@@ -56,6 +56,7 @@ namespace llvm {
   FunctionPass *createTMS320C64XScheduler(TargetMachine &tm);
   FunctionPass *createTMS320C64XBranchDelayExpander(TargetMachine &tm);
   FunctionPass *createTMS320C64XBranchDelayReducer(TargetMachine &tm);
+  FunctionPass* createTMS320C64XCallTimerPass(TMS320C64XTargetMachine &TM);
 
   /// createTMS320C64XIfConversionPass - create a pass for converting if/
   /// else structures for the machine basic blocks for the TMS320C64X target.
