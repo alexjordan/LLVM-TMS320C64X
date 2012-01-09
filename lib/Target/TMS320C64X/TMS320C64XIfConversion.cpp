@@ -1111,7 +1111,7 @@ TMS320C64XIfConversion::getConversionPreference(IfConvertible &candidate) {
     // estimating triangles is a slightly different story, for now we only
     // consider opportunities where we can merge both blocks (FBB and tail
     // into the head). NOTE, we always refer the tail block as TBB here !
-    const unsigned cycleLimit = infoFBB.cycles / AggressiveConversion + 1;
+    const unsigned cycleLimit = infoFBB.cycles / (AggressiveConversion + 1);
 
     // more restrictive for non-fast estimations, fast estimations usually
     // seem to profit from less tight bounds (obtained experimentally...),
@@ -1126,7 +1126,7 @@ TMS320C64XIfConversion::getConversionPreference(IfConvertible &candidate) {
     // only consider diamond-structures which either can completely be col-
     // lapsed into a single block, or disrupted by splitting the tail block
     const unsigned cycleLimit = (execFreqTBB * infoFBB.cycles +
-                 execFreqFBB * infoTBB.cycles) / AggressiveConversion + 1;
+                 execFreqFBB * infoTBB.cycles) / (AggressiveConversion + 1);
 
     // attempt to control register pressure a poor man's way...
     if (headBBI.size + infoFBB.size + infoTBB.size <= sizeLimit)
