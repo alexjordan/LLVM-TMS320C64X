@@ -255,8 +255,8 @@ def or_p_ri : pseudo_ri<"or", ".D1", (i32 sconst5:$imm), unit_d, or, 1>;
 def xor_p_rr : pseudo_rr<"xor", ".D1", unit_d, xor, 0>;
 def xor_p_ri : pseudo_ri<"xor", ".D1", (i32 sconst5:$imm), unit_d, xor, 1>;
 
-def sub_p_rr : pseudo_rr<"sub", ".L1", unit_l, sub, 0>;
-def sub_p_ri : pseudo_ri<"sub", ".D1", (i32 uconst5:$imm), unit_d, sub, 0>;
+// def sub_p_rr : pseudo_rr<"sub", ".L1", unit_l, sub, 0>;
+// def sub_p_ri : pseudo_ri<"sub", ".D1", (i32 uconst5:$imm), unit_d, sub, 0>;
 
 // Prolog asm requires some special cases:
 
@@ -699,6 +699,10 @@ def : Pat<(call_return_label_node texternalsym:$label),
 let Supported = units_notm in {
   defm add_rr : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), add, l_form, "add">;
   defm add_ri : c64ri<(i32 sconst5:$src2), (ins i32imm:$src2), add, l_form, "add">;
+
+  // the same stuff applies to the sub instruction as well
+  defm sub_rr : c64rr<(i32 GPRegs:$src2), (ins GPRegs:$src2), sub, l_form, "sub">;
+  defm sub_ri : c64ri<(i32 sconst5:$src2), (ins i32imm:$src2), sub, l_form, "sub">;
 }
 
 let Supported = units_s in {
