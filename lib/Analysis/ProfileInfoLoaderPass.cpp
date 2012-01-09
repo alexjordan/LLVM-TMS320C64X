@@ -26,6 +26,8 @@
 #include "llvm/Support/Format.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/SmallSet.h"
+#include <sstream>
+#include <string>
 #include <set>
 using namespace llvm;
 
@@ -35,6 +37,10 @@ static cl::opt<std::string>
 ProfileInfoFilename("profile-info-file", cl::init("llvmprof.out"),
                     cl::value_desc("filename"),
                     cl::desc("Profile file loaded by -profile-loader"));
+
+static cl::opt<bool>
+AppendCountsToBlockNames("mangle-block-counts", cl::init(false),
+                    cl::desc("Append profile counts to basic block names"));
 
 namespace {
   class LoaderPass : public ModulePass, public ProfileInfo {
@@ -266,6 +272,30 @@ bool LoaderPass::runOnModule(Module &M) {
         "with the current program (read: " << ReadCount << ", size: "
         << Counters.size() << ")\n";
     }
+  }
+
+  if (!AppendCountsToBlockNames) return false;
+
+  // NKim, this is quite a HACK, and will be removed in future. However, it
+  // does not harm for and makes sense to be used for now. Get already com-
+  // puted block counts and mangle them into basic block names
+  for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
+    if (F->isDeclaration()) continue;
+
+    for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
+       // NKim, additionaly try to make the count persistent
+       std::string blockName = BB->getName().str();
+       std::stringstream SS;
+       SS << (unsigned)getExecutionCount(BB);
+       std::string blockCount = SS.str();
+
+       // NKim, HACK !
+       // now encode the count into the name of the block. Since the name
+       // is assumed to be unique before that, i guess it will stay unique
+       // after changing as well
+       std::string newBlockName = blockName + '_' + blockCount;
+       BB->setName(StringRef(newBlockName.c_str()));
+     }
   }
 
   return false;
