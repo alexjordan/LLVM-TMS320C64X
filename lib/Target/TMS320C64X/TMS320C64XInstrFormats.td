@@ -48,6 +48,7 @@ class UnitSupport<bit l, bit s, bit m, bit d> {
 
 def units_fixed : UnitSupport<0,0,0,0>;
 def units_any   : UnitSupport<1,1,1,1>;
+def units_l     : UnitSupport<1,0,0,0>;
 def units_s     : UnitSupport<0,1,0,0>;
 def units_m     : UnitSupport<0,0,1,0>;
 def units_d     : UnitSupport<0,0,0,1>;
@@ -474,6 +475,20 @@ class pseudoinst<dag outops, dag inops, string asm, list<dag> pat>
   //let isCodeGenOnly = 1;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// instruction class we will be using when messing around with software-pipe- //
+// lining buffer/instructions                                                 //
+////////////////////////////////////////////////////////////////////////////////
+
+class sploopinst<dag inops, string asm>
+: inst<(outs), inops, asm, [], 0, unit_d>
+{
+  // don't match yet
+  let Pattern = [];
+  let Itinerary = NoItinerary;
+  let isCodeGenOnly = 1;
+}
+
 // Instruction class that makes predicate operands ($a, $b) available for
 // matching. (eg. for conditional branches)
 class nodefaultpred_inst<dag outops,
@@ -630,7 +645,7 @@ multiclass c64ri<dag inDag, dag inOp, SDNode op, InstructionForm default,
 }
 
 // same format as c64rr, but without patterns, to be used for postisel opts
-multiclass c64rr_special<dag inOp, InstructionForm default, string mnemonic>
+multiclass c64_special<dag inOp, InstructionForm default, string mnemonic>
 {
   def _1 : c64new<(outs ARegs:$dst), !con((ins ARegs:$src1), inOp),
                   mnemonic, default, side_a>; 

@@ -428,7 +428,99 @@ defm sub_am : sub_addrmode<sub, shl, d_form>;
 // SPECIAL instructions                                                      //
 ///////////////////////////////////////////////////////////////////////////////
 
-// byte swap, see SPRU732 instruction description
+// extract and sign-extend a bit field, this is quite useful for eliminating
+// shift-left/arithmetic shift-right chains in order to sign-extend a field
+// of bits
+
+let Supported = units_s in {
+  let AsmString = "ext\t.$fu\t$src1,\t$csta,\t$csta,\t$dst" in {
+    defm ext : c64_special<(ins i32imm:$csta), s_form, "">;
+  }
+
+  let AsmString = "extu\t.$fu\t$src1,\t$csta,\t$csta,\t$dst" in {
+    defm extu : c64_special<(ins i32imm:$csta), s_form, "">;
+  }
+
+  // variable variants, with csta and cstb being potentially different
+  let AsmString = "ext\t.$fu\t$src1,\t$csta,\t$cstb,\t$dst" in {
+    defm ext_v : c64_special<(ins i32imm:$csta, i32imm:$cstb), s_form, "">;
+  }
+
+  let AsmString = "extu\t.$fu\t$src1,\t$csta,\t$cstb,\t$dst" in {
+    defm extu_v : c64_special<(ins i32imm:$csta, i32imm:$cstb), s_form, "">;
+  }
+}
+
+// NKim, inreg-sign-extension is legal on C64 targets. Note, ext can be exp-
+// loited for other stuff as well, i.e. csta/cstb do not need to be equal in
+// general, therefore two immediates are provided for eventual extensions.
+// For pure sign extension of native int types, both constants are the same
+
+def : Pat<(i32 (sext_inreg ARegs:$src1, i1)),
+            (ext_1 ARegs:$src1, (i32 31))>;
+def : Pat<(i32 (sext_inreg BRegs:$src1, i1)),
+            (ext_2 BRegs:$src1, (i32 31))>;
+
+def : Pat<(i32 (sext_inreg ARegs:$src1, i8)),
+            (ext_1 ARegs:$src1, (i32 24))>;
+def : Pat<(i32 (sext_inreg BRegs:$src1, i8)),
+            (ext_2 BRegs:$src1, (i32 24))>;
+
+def : Pat<(i32 (sext_inreg ARegs:$src1, i16)),
+            (ext_1 ARegs:$src1, (i32 16))>;
+def : Pat<(i32 (sext_inreg BRegs:$src1, i16)),
+            (ext_2 BRegs:$src1, (i32 16))>;
+
+def : Pat<(i32
+        (sra (shl ARegs:$src1, (i32 uconst5:$csta)), (i32 uconst5:$cstb))),
+          (ext_v_1 ARegs:$src1, uconst5:$csta, uconst5:$cstb)>;
+
+def : Pat<(i32
+        (sra (shl BRegs:$src1, (i32 uconst5:$csta)), (i32 uconst5:$cstb))),
+          (ext_v_2 BRegs:$src1, uconst5:$csta, uconst5:$cstb)>;
+
+def : Pat<(i32
+        (srl (shl ARegs:$src1, (i32 uconst5:$csta)), (i32 uconst5:$cstb))),
+          (extu_v_1 ARegs:$src1, uconst5:$csta, uconst5:$cstb)>;
+
+def : Pat<(i32
+        (srl (shl BRegs:$src1, (i32 uconst5:$csta)), (i32 uconst5:$cstb))),
+          (extu_v_2 BRegs:$src1, uconst5:$csta, uconst5:$cstb)>;
+
+// TMS has a special instruction which is useful for some special cases, this
+// instruction inverts one of the sources and performs a bitwise AND with the
+// second source. This is currently matched for a couple of benchmarks and is
+// also patched in during if-conversion when folding predicates
+
+let Supported = units_notm in {
+  defm andn_rr : c64_special<(ins GPRegs:$src2), l_form, "andn">;
+}
+
+def : Pat<(i32 (and ARegs:$src1, (not ARegs:$src2))),
+             (andn_rr_1 ARegs:$src1, ARegs:$src2)>;
+
+def : Pat<(i32 (and BRegs:$src1, (not BRegs:$src2))),
+             (andn_rr_2 BRegs:$src1, BRegs:$src2)>;
+
+// arithmetic negation is done by 'neg', this will again be represented by
+// assembler as 'sub 0, regX' and will probably do not have any performance
+// benefits, however, it compacts and makes the assembler source more neat.
+// This also helps eliminating moves introduced for the subtraction, that
+// requires regs. Note, the instruction goes on L and S units, but for the
+// time being we prefer L over S.
+
+let Supported = units_s in {
+  let AsmString = "neg\t.$fu\t$src1,\t$dst" in {
+    defm neg : c64_special<(ins), l_form, "neg">;
+  }
+}
+
+def : Pat<(i32 (sub (i32 0), ARegs:$src1)), (neg_1 ARegs:$src1)>;
+def : Pat<(i32 (sub (i32 0), BRegs:$src1)), (neg_1 BRegs:$src1)>;
+
+// byte swap, see SPRU732 instruction description, can probably be represen-
+// ted as a swap2/swap4 combo, and if possible, should be done so in order
+// to avoid occupying the M unit. The number of cycles is two in both cases
 
 def swap2 : inst<(outs GPRegs:$dst), (ins GPRegs:$src, pred:$predReg),
     "swap2\t.S1\t$src,\t$dst", [], 0, unit_s>;
@@ -451,28 +543,32 @@ let Itinerary = Multiply16,
 // def : Pat<(i32 (bswap GPRegs:$src)), (swap4 (swap2 GPRegs:$src))>;
 def : Pat<(i32 (bswap GPRegs:$src)), (bitr GPRegs:$src)>;
 
-// TMS has a special instruction which is useful for some special cases, this
-// instruction inverts one of the sources and performs a bitwise AND with the
-// second source. This is currently matched for a couple of benchmarks and is
-// also patched in during if-conversion when folding predicates
-
-let Supported = units_notm in {
-  defm andn_rr: c64rr_special<(ins GPRegs:$src2), l_form, "andn">;
-}
-
-def : Pat<(i32 (and ARegs:$src1, (not ARegs:$src2))),
-             (andn_rr_1 ARegs:$src1, ARegs:$src2)>;
-
-def : Pat<(i32 (and BRegs:$src1, (not BRegs:$src2))),
-             (andn_rr_2 BRegs:$src1, BRegs:$src2)>;
-
 // counting leading zeroes can be done pretty quickly by using lmbd, define
 // matching patterns properly, eventhough ctlz, cttz, etc. are not matched
 // yet for our selection of testing benchmarks
 
-def lmbd : inst<(outs GPRegs:$dst),
-    (ins GPRegs:$src1, GPRegs:$src2, pred:$predReg),
-    "lmbd\t.L1\t$src1,\t$src2,\t$dst", [], 0, unit_l>;
+let Supported = units_l in {
+  // i am not yet sure whether the reg/reg variant makes any sense
+  defm lmbd_rr : c64_special<(ins GPRegs:$src2), l_form, "lmbd">;
+  defm lmbd_ri : c64_special<(ins i32imm:$src2), l_form, "lmbd">;
+}
+
+def : Pat<(i32 (ctlz ARegs:$src1)), (lmbd_ri_1 ARegs:$src1, (i32 1))>;
+def : Pat<(i32 (ctlz BRegs:$src1)), (lmbd_ri_2 BRegs:$src1, (i32 1))>;
+
+// special 'pseudo'-instructions to be used within target optimizers utilizing
+// targets hardware loops. following stuff is predicated, sploopw instruction
+// is even required to use it
+
+def sploop  : sploopinst<(ins i32imm:$initInterval), "sploop">;
+def sploopd : sploopinst<(ins i32imm:$initInterval), "sploopd">;
+def sploopw : sploopinst<(ins i32imm:$initInterval), "sploopw">;
+
+// NKim, spkernel stuff, spmask instructions are still to come
+
+def spkernelr : pseudoinst<(outs), (ins), "spkernelr", []>;
+def spkernel  : pseudoinst<(outs), (ins i32imm:$fstg, i32imm:$fcyc),
+                  "spkernel", []>;
 
 ///////////////////////////////////////////////////////////////////////////////
 // BRANCH instructions                                                       //

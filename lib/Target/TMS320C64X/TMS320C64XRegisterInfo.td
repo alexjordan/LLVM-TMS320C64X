@@ -7,11 +7,27 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MainReg:
+// Spans both clusters and represents user-visible general purpose registers
+// (A0-B31), there are 64 of them in total, therefore we require 6 bits for
+// encoding
+
 class MainReg<bits<6> num, bit side, string n> : Register<n> {
   field bits<6> Num = num;
   bit side = side;
   let Namespace = "TMS320C64X";
 }
+
+// SpecialReg:
+// This class is provided for 'special' registers, like registers for SPLOOP
+// buffer management. For the time being we only reserve 2 bits to distinguish
+// ILC/RILC and time stamp registers
+
+class SpecialReg<bits<3> num, string n> : Register<n> {
+  let Namespace = "TMS320C64X";
+}
+
+//----------------------------------------------------------------------------
 
 def A0  : MainReg<0, 0, "A0">, DwarfRegNum<[0]>;
 def A1  : MainReg<1, 0, "A1">, DwarfRegNum<[1]>;
@@ -77,6 +93,35 @@ def B28 : MainReg<60, 1, "B28">, DwarfRegNum<[60]>;
 def B29 : MainReg<61, 1, "B29">, DwarfRegNum<[61]>;
 def B30 : MainReg<62, 1, "B30">, DwarfRegNum<[62]>;
 def B31 : MainReg<63, 1, "B31">, DwarfRegNum<[63]>;
+
+// SPLOOP buffer counter registers, there is also LBC, which however, is not
+// user-visible and therefore not manipulable during hw/software pipelining
+def ILC  : SpecialReg<0, "ILC">, DwarfRegNum<[64]>;
+def RILC : SpecialReg<1, "RILC">, DwarfRegNum<[65]>;
+
+//----------------------------------------------------------------------------
+
+def SPLOOPRegs : RegisterClass<"TMS320C64X", [i32], 32, [ILC, RILC]> {
+
+let MethodProtos = [{
+  iterator allocation_order_begin(const MachineFunction &MF) const;
+  iterator allocation_order_end(const MachineFunction &MF) const;
+}];
+let MethodBodies = [{
+  SPLOOPRegsClass::iterator
+  SPLOOPRegsClass::allocation_order_begin(const MachineFunction &MF) const {
+    // not allocatable yet
+    return end();
+  }
+  SPLOOPRegsClass::iterator
+  SPLOOPRegsClass::allocation_order_end(const MachineFunction &MF) const {
+    // not allocatable yet
+    return end();
+  }
+}];
+}
+
+//----------------------------------------------------------------------------
 
 // Predicate registers: things that can be used for conditional execution
 // in instructions: A0-2, B0-2.
