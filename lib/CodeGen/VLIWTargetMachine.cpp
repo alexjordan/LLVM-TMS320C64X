@@ -299,11 +299,6 @@ bool VLIWTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
 
   // Standard Lower-Level Passes.
 
-  // NKim, edge-profile instrumenter breaks all critical edges before doing its
-  // instrumenting job. Therefore, to match the block layout, we need to do this
-  // too in cases we are going to use the profile...Make it unconditional now...
-  PM.add(createBreakCriticalEdgesPass());
-
   // NKim, create and run a path-profile-loader pass if required. The pass as
   // such is passed to the pass-manager and additionally a reference is stored.
   // this reference is then passed to the clients of this pass (f.e. superblock

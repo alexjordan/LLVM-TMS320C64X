@@ -336,10 +336,6 @@ bool LLVMTargetMachine::addCommonCodeGenPasses(PassManagerBase &PM,
   // to ensure that the IR is valid.
   if (!DisableVerify) PM.add(createVerifierPass());
 
-  // Standard Lower-Level Passes.
-//  if (EnablePathProfileLoader || EnableEdgeProfileLoader)
-//    PM.add(createBreakCriticalEdgesPass());
-
   // NKim, create and run a path-profile-loader pass if required. The pass as
   // such is passed to the pass-manager and additionally a reference is stored.
   // this reference is then passed to the clients of this pass (f.e. superblock
