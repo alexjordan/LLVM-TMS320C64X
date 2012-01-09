@@ -227,8 +227,8 @@ char MachineEdgeProfileEstimator::ID = 0;
 // specify default implementation properly if you want to use
 // either a loader or an estimator to provide provide information
 INITIALIZE_ANALYSIS_GROUP(MachineProfileAnalysis,
-  "Machine profile information", MachineProfileLoader)
-//  "Machine profile information", MachineEdgeProfileEstimator)
+//  "Machine profile information", MachineProfileLoader)
+  "Machine profile information", MachineEdgeProfileEstimator)
 
 INITIALIZE_AG_PASS(MachineProfileLoader, MachineProfileAnalysis,
   "mach-prof-loader", "Load machine profile information from file", 0, 1, 1)

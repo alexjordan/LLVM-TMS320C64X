@@ -277,13 +277,12 @@ bool LoaderPass::runOnModule(Module &M) {
   if (!AppendCountsToBlockNames) return false;
 
   // NKim, this is quite a HACK, and will be removed in future. However, it
-  // does not harm for and makes sense to be used for now. Get already com-
-  // puted block counts and mangle them into basic block names
+  // does not harm and makes sense to be used for now. Get already computed
+  // block counts and mangle them into basic block names
   for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
     if (F->isDeclaration()) continue;
 
     for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
-       // NKim, additionaly try to make the count persistent
        std::string blockName = BB->getName().str();
        std::stringstream SS;
        SS << (unsigned)getExecutionCount(BB);
