@@ -213,32 +213,51 @@ bool TMS320C64XInstSelectorPass::select_addr(SDNode *&op,
       offs = SDValue(SelectCode(offs.getNode()), 0);
       return true;
     }
-  } else if (N.getOpcode() == ISD::ADD) {
-    // No constant offset, so values will be in registers when
-    // the get to us. XXX: is operand(1) always the constant, or
-    // can it be in 0 too?
+  }
+  else if (N.getOpcode() == ISD::ADD) {
+    // No constant offset, so values will be in registers when they get to us.
+    // XXX: is operand(1) always the constant, or can it be in 0 too?
 
-    // We can use operand as index if it's add - just leave
-    // as 2nd operand. Could also implement allowing subtract,
-    // but this means passing addressing mode information down
-    // to the assembly printer, which I suspect will mean pain.
+    // We can use operand as index if it's add - just leave  as 2nd operand.
+    // Could also implement allowing subtract, but this means passing addres-
+    // sing mode information down to the assembly printer, which I suspect
+    // will mean pain.
 
-    // As mentioned above though, hardware will scale the offset,
-    // so we need to insert a shift here.
-    base = N.getOperand(0);
-    SDValue ops[4];
-    ops[0] = N.getOperand(1);
-    ops[1] = CurDAG->getTargetConstant((int)log2(align), MVT::i32);
-    ops[2] = CurDAG->getTargetConstant(-1, MVT::i32);
-    ops[3] = CurDAG->getRegister(TMS320C64X::NoRegister, MVT::i32);
-    offs = CurDAG->getNode(ISD::SRA, dl, MVT::i32, ops, 4);
+    // As mentioned above though, hardware will scale the offset, so we need
+    // to insert a shift here.
 
-    // That's a MI instruction and we're in the middle of depth
-    // first instruction selection, this won't get selected. So,
-    // make that happen manually.
-    offs = SDValue(SelectCode(offs.getNode()), 0);
+    // NKim, check for a zero scale in order to avoid dead shifts
+    const int scale = (int)log2(align);
+
+    if (scale != 0) {
+
+      base = N.getOperand(0);
+      SDValue ops[4];
+      ops[0] = N.getOperand(1);
+
+      // NKim, must not be a target constant here ! We may want to match new
+      // patterns for folding eventual shl/shr pairs into one sign-extension
+      // instruction !
+      ops[1] = CurDAG->getConstant(scale, MVT::i32);
+
+      // predication register/immediate value stuff, no functional unit spec
+      // here, since we insert an intermediate node into the offset chain
+      ops[2] = CurDAG->getTargetConstant(-1, MVT::i32);
+      ops[3] = CurDAG->getRegister(TMS320C64X::NoRegister, MVT::i32);
+      offs = CurDAG->getNode(ISD::SRA, dl, MVT::i32, ops, 4);
+
+      // That's a MI instruction and we're in the middle of depth
+      // first instruction selection, this won't get selected. So,
+      // make that happen manually.
+      offs = SDValue(SelectCode(offs.getNode()), 0);
+    }
+    else {
+      base = N;
+      offs = CurDAG->getTargetConstant(0, MVT::i32);
+    }
     return true;
-  } else {
+  }
+  else {
     // Doesn't match anything we recognize at all, use address
     // as it is (aka let llvm deal with it), set offset to zero
     // to ensure it doesn't intefere with address calculation.

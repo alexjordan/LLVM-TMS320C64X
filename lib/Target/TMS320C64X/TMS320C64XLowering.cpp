@@ -151,10 +151,10 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
   setOperationAction(ISD::JumpTable, MVT::i32, Custom);
 
-  // No in-reg sx
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Expand);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
+  // Inreg sign extension is supported natively on C64 targets
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Legal);
 
   // No divide anything
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
@@ -172,9 +172,7 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setLibcallName(RTLIB::UDIV_I32, "__divu");
   setLibcallName(RTLIB::UREM_I32, "__remu");
 
-  //
-  // Support for RT lib from TI
-  //
+  /// Support for RT lib from TI
 
   // Integer arithmetic
   setLibcallCustom(RTLIB::SDIV_I32, "divi");
@@ -244,6 +242,32 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setLibcallCustom(RTLIB::UINTTOFP_I32_F64, "fltud");
   setLibcallCustom(RTLIB::UINTTOFP_I32_F32, "fltuf");
 
+  // signed/unsigned long long to double/float conversions
+  setLibcallCustom(RTLIB::UINTTOFP_I64_F64, "fltulld");
+  setLibcallCustom(RTLIB::SINTTOFP_I64_F64, "fltllid");
+  setLibcallCustom(RTLIB::UINTTOFP_I64_F32, "fltullf");
+  setLibcallCustom(RTLIB::SINTTOFP_I64_F32, "fltllif");
+
+  // float/double to signed/unsigned long long conversions
+  setLibcallCustom(RTLIB::FPTOSINT_F64_I64, "fixdlli");
+  setLibcallCustom(RTLIB::FPTOUINT_F64_I64, "fixdull");
+  setLibcallCustom(RTLIB::FPTOSINT_F32_I64, "fixflli");
+  setLibcallCustom(RTLIB::FPTOUINT_F32_I64, "fixfull");
+
+  // signed/unsigned long long remainders
+  setLibcallCustom(RTLIB::SREM_I64, "remlli");
+  setLibcallCustom(RTLIB::UREM_I64, "remull");
+
+  // signed long long multiplication only, signed/unsigned dif
+  setLibcallCustom(RTLIB::MUL_I64, "mpyll");
+  setLibcallCustom(RTLIB::SDIV_I64, "divlli");
+  setLibcallCustom(RTLIB::UDIV_I64, "divull");
+
+  // signed/unsigned long long shifting stuff
+  setLibcallCustom(RTLIB::SHL_I64, "llshl");
+  setLibcallCustom(RTLIB::SRA_I64, "llshr");
+  setLibcallCustom(RTLIB::SRL_I64, "llshru");
+
   // We can generate two conditional instructions for select, not so
   // easy for select_cc
   setOperationAction(ISD::SELECT, MVT::i32, Custom);
@@ -279,6 +303,12 @@ TMS320C64XLowering::TMS320C64XLowering(TargetMachine &tm)
   setOperationAction(ISD::SUBC, MVT::i32, Expand);
   setOperationAction(ISD::ADDE, MVT::i32, Expand);
   setOperationAction(ISD::SUBE, MVT::i32, Expand);
+
+  // counting leading zeros is natively possible
+  setOperationAction(ISD::CTLZ, MVT::i32, Legal);
+  setOperationAction(ISD::CTLZ, MVT::i16, Legal);
+  setOperationAction(ISD::CTLZ, MVT::i8, Legal);
+  setOperationAction(ISD::CTLZ, MVT::i1, Legal);
 
   // VACOPY and VAEND apparently have sane defaults, however
   // VASTART and VAARG can't be expanded
@@ -1027,6 +1057,8 @@ SDValue TMS320C64XLowering::LowerVAARG(SDValue op, SelectionDAG &DAG) const {
     vt, op.getDebugLoc(), chain, loadptr, MachinePointerInfo(), false, false, 4);
 }
 
+//-----------------------------------------------------------------------------
+
 void
 TMS320C64XLowering::setLibcallCustom(RTLIB::Libcall Call, const char *Name) {
   SmallString<30> smallstr;
@@ -1053,11 +1085,13 @@ TMS320C64XLowering::setLibcallCustom(RTLIB::Libcall Call, const char *Name) {
   setLibcallName(Call, stored);
 }
 
+//-----------------------------------------------------------------------------
+
 SDValue
-TMS320C64XLowering::LowerIntrinsic(SDValue op, SelectionDAG &DAG) const
-{
-  MachineFunction &MF = DAG.getMachineFunction();
-  MachineRegisterInfo &RegInfo = MF.getRegInfo();
+TMS320C64XLowering::LowerIntrinsic(SDValue op, SelectionDAG &DAG) const {
+
+//  MachineFunction &MF = DAG.getMachineFunction();
+//  MachineRegisterInfo &RegInfo = MF.getRegInfo();
   DebugLoc dl = op.getDebugLoc();
   unsigned IntNo = cast<ConstantSDNode>(op.getOperand(1))->getZExtValue();
   unsigned Opc = 0;
