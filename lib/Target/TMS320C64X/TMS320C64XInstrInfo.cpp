@@ -504,7 +504,7 @@ TMS320C64XInstrInfo::InsertBranch(MachineBasicBlock &MBB,
       // when dealing with conditional branches without fallthroughs (branch
       // analyzer result), also do a branch insertion to the false-successor
       addDefaultPred(BuildMI(&MBB,
-        DL, get(TMS320C64X::branch_cond)).addMBB(FBB));
+        DL, get(TMS320C64X::branch)).addMBB(FBB));
 
       numInsertedBranches++;
     }
