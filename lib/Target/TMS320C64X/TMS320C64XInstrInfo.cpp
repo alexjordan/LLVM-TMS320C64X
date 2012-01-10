@@ -115,8 +115,11 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
 
     ,{ C64X::add_rr_1,       C64X::add_rr_2 }
     ,{ C64X::add_ri_1,       C64X::add_ri_2 }
+    ,{ C64X::sub_rr_1,       C64X::sub_rr_2 }
+    ,{ C64X::sub_ri_1,       C64X::sub_ri_2 }
     ,{ C64X::srl_rr_1,       C64X::srl_rr_2 }
     ,{ C64X::srl_ri_1,       C64X::srl_ri_2 }
+    ,{ C64X::neg_1,          C64X::neg_2 }
 
     ,{ C64X::add_am_d_1,     C64X::add_am_d_2 }
     ,{ C64X::add_am_w_1,     C64X::add_am_w_2 }
@@ -139,6 +142,8 @@ TMS320C64XInstrInfo::TMS320C64XInstrInfo()
     ,{ C64X::byte_sload_1,   C64X::byte_sload_2 }
     ,{ C64X::byte_store_1,   C64X::byte_store_2 }
     ,{ C64X::ubyte_sload_1,  C64X::ubyte_sload_2 }
+    ,{ C64X::ext_1,          C64X::ext_2 }
+    ,{ C64X::ext_v_1,        C64X::ext_v_2 }
   };
 
   for (unsigned i = 0, e = array_lengthof(SideOpTbl); i != e; ++i) {
@@ -739,7 +744,8 @@ int TMS320C64XInstrInfo::getSideOpcode(int Opcode, int Side) const {
 
   DenseMap<unsigned, unsigned>::const_iterator I = Side2SideMap.find(Opcode);
   if (I == Side2SideMap.end()) {
-    assert(false && "not found");
+    errs() << get(Opcode).getName() << "\n";
+    llvm_unreachable("opcode not found");
     return -1;
   }
   return I->second;
